@@ -1,29 +1,32 @@
 package io.dylemma.xml.experimental
 
+import javax.xml.stream.events.XMLEvent
+
 import io.dylemma.xml.Result.{ Empty, Error }
-import io.dylemma.xml.experimental.Experiments.{ End, Event, Start }
+import io.dylemma.xml.event.EndElement
 
 trait Splitter[E] {
-	def joinWith[A](consumer: Consumer[E, A]): Transformer[E, A]
+	def through[A](consumer: Consumer[E, A]): Transformer[E, A]
 }
 
-trait StackBasedSplitter extends Splitter[Event] {
+trait StackBasedSplitter extends Splitter[XMLEvent] {
 
 	/** If there's a match, return the remaining (tail) parts of the list
 		* following the matched prefix. Returning `Some(Nil)` implies that
 		* a matching scope has just opened.
 		*/
-	def matchStack(stack: List[String]): Option[List[String]]
+	def matchStack(stack: List[Tag]): Option[List[Tag]]
 
-	def joinWith[A](makeConsumer: Consumer[Event, A]): Transformer[Event, A] = new Transformer[Event, A] {
-		def makeHandler() = new TransformerHandler[Event, A] {
-			var stack: List[String] = Nil
-			var consumer: Option[ConsumerHandler[Event, A]] = None
+	def through[A](makeConsumer: Consumer[XMLEvent, A]): Transformer[XMLEvent, A] = new Transformer[XMLEvent, A] {
+		def makeHandler() = new Handler[XMLEvent, A, TransformerState] {
+			var stack: List[Tag] = Nil
+			var consumer: Option[Handler[XMLEvent, A, ConsumerState]] = None
 
-			def handle(event: Event): TransformerState[A] = event match {
-				case Start(name) =>
+			def handleEvent(event: XMLEvent): TransformerState[A] = event match {
+				case _ if event.isStartElement =>
 					// push to the stack
-					stack :+= name
+					val tag = new Tag(event.asStartElement)
+					stack :+= tag
 					if (consumer.isEmpty) {
 						matchStack(stack) match {
 							case Some(Nil) => consumer = Some(makeConsumer.makeHandler())
@@ -43,7 +46,7 @@ trait StackBasedSplitter extends Splitter[Event] {
 						}
 					}
 
-				case End =>
+				case end @ EndElement(_) =>
 					stack = stack dropRight 1
 
 					consumer match {
@@ -54,7 +57,7 @@ trait StackBasedSplitter extends Splitter[Event] {
 						 */
 						case None => if (stack.isEmpty) Done(Empty) else Working
 
-						case Some(c) => c.handleEvent(End) match {
+						case Some(c) => c.handleEvent(end) match {
 							/*
 							If the inner consumer finished, emit its result...
 							Unless there is no more stack, in which we are done,

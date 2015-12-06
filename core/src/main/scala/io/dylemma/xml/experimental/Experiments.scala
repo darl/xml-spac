@@ -1,42 +1,31 @@
 package io.dylemma.xml.experimental
 
+import javax.xml.stream.events.XMLEvent
+
 import io.dylemma.xml.Result._
+import io.dylemma.xml.event._
 
 object Experiments extends App {
 
-	//*****************************************************
-
-	sealed trait Event
-
-	case class Start(name: String) extends Event
-	case class Text(text: String) extends Event
-	case object End extends Event
-
-	//*****************************************************
-
-	val exampleEvents = List[Event](
-		Start("A"),
-		Start("B"),
-		Text("Hello"),
-		Start("C"),
-		Text("Hello2"),
-		End,
-		End,
-		Start("B"),
-		Text("Goodbye"),
-		Text("Goodbye2"),
-		End,
-		End
-	)
+	val exampleXml = """<A>
+	| <B>
+	|   Hello
+	|   <C>Hello2</C>
+	| </B>
+	| <B>
+	|   Goodbye
+	|   Goodbye2
+	| </B>
+	|</A>""".stripMargin
 
 	//*****************************************************
 
-	object TextConsumer extends Consumer[Event, String] {
-		def makeHandler() = new ConsumerHandler[Event, String] {
+	object TextConsumer extends Consumer[XMLEvent, String] {
+		def makeHandler() = new Handler[XMLEvent, String, ConsumerState] {
 			val sb = new StringBuilder
-			def handleEvent(event: Event) = {
+			def handleEvent(event: XMLEvent) = {
 				event match {
-					case Text(text) => sb append text
+					case Characters(text) => sb append text
 					case _ =>
 				}
 				Working
@@ -48,26 +37,25 @@ object Experiments extends App {
 
 	//*****************************************************
 
-	val myStream = Stream.of(exampleEvents)
-
 	val mySplitter = new StackBasedSplitter {
-		override def matchStack(stack: List[String]): Option[List[String]] = stack match {
-			case "A" :: "B" :: list => Some(list)
+		override def matchStack(stack: List[Tag]): Option[List[Tag]] = stack match {
+			case Tag("A") :: Tag("B") :: list => Some(list)
 			case _ => None
 		}
 	}
 
-	val myTransformer = mySplitter.joinWith(TextConsumer)
+	val myTransformer = mySplitter.through(TextConsumer)
 
 	val myConsumer = Consumer.foreachResult[String]{ result =>
 		println(s"RESULT { $result }")
 	}
 
-	val result = myStream
+
+	val result = Stream.ofXml(exampleXml)
 		.logAs("stream")
 		.transformWith(myTransformer)
-		.logAs("transformed")
 		.drive(myConsumer)
+
 	println(s"END WITH { $result }")
 
 	//*****************************************************
