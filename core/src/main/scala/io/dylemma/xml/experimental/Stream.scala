@@ -3,14 +3,14 @@ package io.dylemma.xml.experimental
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.events.XMLEvent
 
-import io.dylemma.xml.{ XMLEventSource, AsInputStream, Result }
 import io.dylemma.xml.Result.{ Empty, Error, Success }
+import io.dylemma.xml.{ AsInputStream, Result, XMLEventSource }
 
 object Stream {
 	def of[E](t: Iterable[E]): Stream[E] = new Stream[E] {
-		def drive[A](consumer: Consumer[E, A]) = {
+		def drive[A](consumer: Parser[E, A]) = {
 			val handler = consumer.makeHandler()
-			var state: ConsumerState[A] = Working
+			var state: ParserState[A] = Working
 			val itr = t.iterator
 			while (itr.hasNext && !state.isDone) {
 				val event = itr.next
@@ -28,7 +28,7 @@ object Stream {
 		source: R,
 		inputFactory: XMLInputFactory = XMLEventSource.defaultInputFactory
 	): Stream[XMLEvent] = new Stream[XMLEvent] {
-		def drive[A](consumer: Consumer[XMLEvent, A]) = {
+		def drive[A](consumer: Parser[XMLEvent, A]) = {
 			val provider = implicitly[AsInputStream[R]]
 			val resource = provider openResource source
 			try {
@@ -36,15 +36,15 @@ object Stream {
 				val eventReader = inputFactory createXMLEventReader stream
 				val handler = consumer.makeHandler()
 
-				var state: ConsumerState[A] = Working
-				while(eventReader.hasNext && !state.isDone){
+				var state: ParserState[A] = Working
+				while (eventReader.hasNext && !state.isDone) {
 					val event = eventReader.nextEvent
 					state = handler handleEvent event
 				}
-				if(!state.isDone && !eventReader.hasNext){
+				if (!state.isDone && !eventReader.hasNext) {
 					state = handler.handleEOF()
 				}
-				if(state.hasResult) state.result
+				if (state.hasResult) state.result
 				else Empty
 			} finally {
 				provider.closeResource(resource)
@@ -53,69 +53,67 @@ object Stream {
 	}
 }
 
-private trait SingleUseConsumer[E, A] extends Consumer[E, A] with Handler[E, A, ConsumerState] {
-	def makeHandler() = this
-}
-
-class ConsumerWithTransformedInput[A, B, C](transformerA: Transformer[A, B], consumer: Consumer[B, C])
-	extends Consumer[A, C] {
-	def makeHandler() = new Handler[A, C, ConsumerState]{
-		val consumerB = consumer.makeHandler()
-		val transformer = transformerA.makeHandler()
-
-			def feedTransformerState(s: TransformerState[B]) = s match {
-				case Working => Working
-				case Done(resultB) => resultB match {
-					case Success(b) => consumerB handleEvent b
-					case Error(err) => consumerB handleError err
-					case Empty => Done(Empty)
-				}
-				case Emit(resultB) => resultB match {
-					case Success(b) => consumerB.handleEvent(b)
-					case Error(err) => consumerB.handleError(err)
-					case Empty => Working
-				}
-			}
-
-			def handleEvent(event: A) = feedTransformerState(transformer handleEvent event)
-			def handleError(err: Throwable) = feedTransformerState(transformer handleError err)
-			def handleEOF() = feedTransformerState(transformer.handleEOF())
-	}
-}
-
-trait Stream[E] {stream =>
-	def drive[A](handler: Consumer[E, A]): Result[A]
+trait Stream[E] {self =>
+	def drive[A](parser: Parser[E, A]): Result[A]
 
 	def transformWith[B](transformer: Transformer[E, B]): Stream[B] = new Stream[B] {
-		def drive[T](consumer: Consumer[B, T]) = {
-			val betweenConsumer = new ConsumerWithTransformedInput(transformer, consumer)
+		def drive[T](parser: Parser[B, T]) = {
+			val betweenConsumer = new ParserWithTransformedInput(transformer, parser)
 
-			stream.drive(betweenConsumer)
+			self.drive(betweenConsumer)
 		}
 	}
 
 	def logAs(label: String): Stream[E] = new Stream[E] {
-		def drive[T](consumerMaker: Consumer[E, T]) = {
-			val consumer = consumerMaker.makeHandler()
-			val betweenConsumer = new SingleUseConsumer[E, T] {
-				def handleEvent(event: E) = {
-					val s = consumer.handleEvent(event)
-					println(s"$label: $event --> $s")
-					s
-				}
-				def handleError(err: Throwable) = {
-					val s = consumer.handleError(err)
-					println(s"$label: <error: $err> --> $s")
-					s
-				}
-				def handleEOF() = {
-					val s = consumer.handleEOF()
-					println(s"$label: <eof> --> $s")
-					s
+		def drive[T](parser: Parser[E, T]) = {
+			val wrappedConsumer = new Parser[E, T] {
+				def makeHandler() = new Handler[E, T, ParserState] {
+					val innerHandler = parser.makeHandler()
+					def handleEvent(event: E) = {
+						val s = innerHandler handleEvent event
+						println(s"$label: $event --> $s")
+						s
+					}
+					def handleError(err: Throwable) = {
+						val s = innerHandler.handleError(err)
+						println(s"$label: <error: $err> --> $s")
+						s
+					}
+					def handleEOF() = {
+						val s = innerHandler.handleEOF()
+						println(s"$label: <eof> --> $s")
+						s
+					}
 				}
 			}
-			stream.drive(betweenConsumer)
+			self drive wrappedConsumer
 		}
 	}
 
+}
+
+private class ParserWithTransformedInput[A, B, C](transformerA: Transformer[A, B], parser: Parser[B, C])
+	extends Parser[A, C] {
+	def makeHandler() = new Handler[A, C, ParserState] {
+		val innerHandler = parser.makeHandler()
+		val transformHandler = transformerA.makeHandler()
+
+		def feedTransformerState(s: TransformerState[B]) = s match {
+			case Working => Working
+			case Done(resultB) => resultB match {
+				case Success(b) => innerHandler handleEvent b
+				case Error(err) => innerHandler handleError err
+				case Empty => Done(Empty)
+			}
+			case Emit(resultB) => resultB match {
+				case Success(b) => innerHandler.handleEvent(b)
+				case Error(err) => innerHandler.handleError(err)
+				case Empty => Working
+			}
+		}
+
+		def handleEvent(event: A) = feedTransformerState(transformHandler handleEvent event)
+		def handleError(err: Throwable) = feedTransformerState(transformHandler handleError err)
+		def handleEOF() = feedTransformerState(transformHandler.handleEOF())
+	}
 }

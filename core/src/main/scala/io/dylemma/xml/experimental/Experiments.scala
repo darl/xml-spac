@@ -20,8 +20,8 @@ object Experiments extends App {
 
 	//*****************************************************
 
-	object TextConsumer extends Consumer[XMLEvent, String] {
-		def makeHandler() = new Handler[XMLEvent, String, ConsumerState] {
+	object TextParser extends Parser[XMLEvent, String] {
+		def makeHandler() = new Handler[XMLEvent, String, ParserState] {
 			val sb = new StringBuilder
 			def handleEvent(event: XMLEvent) = {
 				event match {
@@ -44,9 +44,9 @@ object Experiments extends App {
 		}
 	}
 
-	val myTransformer = mySplitter.through(TextConsumer)
+	val myTransformer = mySplitter.through(TextParser)
 
-	val myConsumer = Consumer.foreachResult[String]{ result =>
+	val myConsumer = Parser.foreachResult[String]{ result =>
 		println(s"RESULT { $result }")
 	}
 
