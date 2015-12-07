@@ -2,22 +2,25 @@ package io.dylemma.xml.experimental
 
 import scala.language.higherKinds
 
-import io.dylemma.xml.Result
+import io.dylemma.xml.{ Chain => ~, MapR, Result }
 import io.dylemma.xml.Result._
-import io.dylemma.xml.{ Chain => ~ }
 
 trait ParserForContext[-In, -E, +A] { self =>
 	def makeHandler(context: In): Handler[E, A, ParserState]
+}
 
-	def &[In1 <: In, In2, C, E2 <: E, A2](
-		parser2: ParserForContext[In2, E2, A2])(
-		implicit ev: C >:< (In1, In2)
-	): ParserForContext[C, E2, A ~ A2] = new ParserForContext[C, E2, A ~ A2] {
-		def makeHandler(context: C) = {
-			val (context1, context2) = ev(context)
-			val handler1 = self makeHandler context1
-			val handler2 = parser2 makeHandler context2
-			new CombinedParserHandler(handler1, handler2)
+trait ParserCombinerOps {
+	implicit class ParserWithCombine[In1, E, A1](parser1: ParserForContext[In1, E, A1]){
+		def &[In2, A2, C](
+			parser2: ParserForContext[In2, E, A2])(
+			implicit ev: C >:< (In1, In2)
+		): ParserForContext[C, E, A1 ~ A2] = new ParserForContext[C, E, A1 ~ A2] {
+			def makeHandler(context: C) = {
+				val (context1, context2) = ev(context)
+				val handler1 = parser1 makeHandler context1
+				val handler2 = parser2 makeHandler context2
+				new CombinedParserHandler(handler1, handler2)
+			}
 		}
 	}
 }
@@ -30,6 +33,16 @@ trait Parser[-E, +A] extends ParserForContext[Any, E, A] { self =>
 			val handler1 = self makeHandler context
 			val handler2 = parser2 makeHandler context
 			new CombinedParserHandler(handler1, handler2)
+		}
+	}
+
+	def &[C, E2 <: E, A2](parser2: ParserForContext[C, E2, A2]): ParserForContext[C, E2, A ~ A2] = {
+		new ParserForContext[C, E2, A ~ A2] {
+			def makeHandler(context: C) = {
+				val handler1 = self makeHandler context
+				val handler2 = parser2 makeHandler context
+				new CombinedParserHandler(handler1, handler2)
+			}
 		}
 	}
 }
@@ -97,7 +110,7 @@ object Parser {
 
 
 
-	def inContext[In, E] = new ParserForContext[In, E, In] {
+	def inContext[In, E]: ParserForContext[In, E, In] = new ParserForContext[In, E, In] {
 		def makeHandler(context: In) = new Handler[E, In, ParserState] {
 			// ignore all inputs, just return the result
 			val state = Done(Success(context))

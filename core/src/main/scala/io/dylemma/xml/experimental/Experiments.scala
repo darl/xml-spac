@@ -8,7 +8,7 @@ import io.dylemma.xml.Result._
 import io.dylemma.xml.event._
 import io.dylemma.xml.{Chain => ~}
 
-object Experiments extends App {
+object Experiments extends App with ParserCombinerOps {
 
 	val exampleXml = """<A>
 	| <B>
@@ -50,6 +50,7 @@ object Experiments extends App {
 	val tp: ParserForContext[Any, XMLEvent, String] = TextParser
 
 	val combinedJoiner = TextParser & Parser.inContext[String, XMLEvent]
+	val combinedJoiner2 = Parser.inContext[String, XMLEvent] & TextParser
 
 	val myTransformer = mySplitter.through(combinedJoiner)
 
