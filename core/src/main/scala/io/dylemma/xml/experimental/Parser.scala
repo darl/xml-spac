@@ -5,12 +5,26 @@ import scala.language.higherKinds
 import io.dylemma.xml.{ Chain => ~, MapR, Result }
 import io.dylemma.xml.Result._
 
-trait ParserForContext[-In, -E, +A] { self =>
+trait ParserForContext[-In, -E, +A] {self =>
 	def makeHandler(context: In): Handler[E, A, ParserState]
+
+	def inContext(context: In): Parser[E, A] = new Parser[E, A] {
+		def makeHandler(ignored: Any) = self.makeHandler(context)
+	}
+
+	def mapContext[C](f: C => In): ParserForContext[C, E, A] = new ParserForContext[C, E, A] {
+		def makeHandler(context: C) = self makeHandler f(context)
+	}
+
+	def mapR[B](f: Result[A] => Result[B]): ParserForContext[In, E, B] = {
+		new ParserForContext[In, E, B] {
+			def makeHandler(context: In) = new MappedParserHandler(self makeHandler context, f)
+		}
+	}
 }
 
 trait ParserCombinerOps {
-	implicit class ParserWithCombine[In1, E, A1](parser1: ParserForContext[In1, E, A1]){
+	implicit class ParserWithCombine[In1, E, A1](parser1: ParserForContext[In1, E, A1]) {
 		def &[In2, A2, C](
 			parser2: ParserForContext[In2, E, A2])(
 			implicit ev: C >:< (In1, In2)
@@ -25,7 +39,7 @@ trait ParserCombinerOps {
 	}
 }
 
-trait Parser[-E, +A] extends ParserForContext[Any, E, A] { self =>
+trait Parser[-E, +A] extends ParserForContext[Any, E, A] {self =>
 	def makeHandler(): Handler[E, A, ParserState] = makeHandler(())
 
 	def &[E2 <: E, A2](parser2: Parser[E2, A2]): Parser[E2, A ~ A2] = new Parser[E2, A ~ A2] {
@@ -45,12 +59,25 @@ trait Parser[-E, +A] extends ParserForContext[Any, E, A] { self =>
 			}
 		}
 	}
+
+	override def mapR[B](f: Result[A] => Result[B]): Parser[E, B] = new Parser[E, B] {
+		def makeHandler(context: Any) = new MappedParserHandler(self makeHandler context, f)
+	}
 }
 
 trait Handler[-E, +A, +S[+ _]] {
 	def handleEvent(event: E): S[A]
 	def handleError(err: Throwable): S[A]
 	def handleEOF(): S[A]
+}
+
+private class MappedParserHandler[E, A, B](
+	innerHandler: Handler[E, A, ParserState],
+	f: Result[A] => Result[B]
+) extends Handler[E, B, ParserState] {
+	def handleEvent(event: E) = innerHandler.handleEvent(event).mapR(f)
+	def handleEOF() = innerHandler.handleEOF().mapR(f)
+	def handleError(err: Throwable) = innerHandler.handleError(err).mapR(f)
 }
 
 /** Specialization of Parser that has no internal state, allowing it
@@ -107,8 +134,6 @@ object Parser {
 		() => Done(result),
 		err => Done(result)
 	)
-
-
 
 	def inContext[In, E]: ParserForContext[In, E, In] = new ParserForContext[In, E, In] {
 		def makeHandler(context: In) = new Handler[E, In, ParserState] {
