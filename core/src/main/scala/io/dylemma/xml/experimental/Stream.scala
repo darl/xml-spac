@@ -67,7 +67,7 @@ trait Stream[E] {self =>
 	def logAs(label: String): Stream[E] = new Stream[E] {
 		def drive[T](parser: Parser[E, T]) = {
 			val wrappedConsumer = new Parser[E, T] {
-				def makeHandler() = new Handler[E, T, ParserState] {
+				def makeHandler(context: Any) = new Handler[E, T, ParserState] {
 					val innerHandler = parser.makeHandler()
 					def handleEvent(event: E) = {
 						val s = innerHandler handleEvent event
@@ -94,7 +94,7 @@ trait Stream[E] {self =>
 
 private class ParserWithTransformedInput[A, B, C](transformerA: Transformer[A, B], parser: Parser[B, C])
 	extends Parser[A, C] {
-	def makeHandler() = new Handler[A, C, ParserState] {
+	def makeHandler(context: Any) = new Handler[A, C, ParserState] {
 		val innerHandler = parser.makeHandler()
 		val transformHandler = transformerA.makeHandler()
 

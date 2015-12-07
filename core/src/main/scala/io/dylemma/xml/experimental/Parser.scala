@@ -4,10 +4,34 @@ import scala.language.higherKinds
 
 import io.dylemma.xml.Result
 import io.dylemma.xml.Result._
+import io.dylemma.xml.{ Chain => ~ }
 
-trait Parser[-E, +A] {
-	def makeHandler(): Handler[E, A, ParserState]
-	// TODO: def makeHandler(context: C): ConsumerHandler[E, A]
+trait ParserForContext[-In, -E, +A] { self =>
+	def makeHandler(context: In): Handler[E, A, ParserState]
+
+	def &[In1 <: In, In2, C, E2 <: E, A2](
+		parser2: ParserForContext[In2, E2, A2])(
+		implicit ev: C >:< (In1, In2)
+	): ParserForContext[C, E2, A ~ A2] = new ParserForContext[C, E2, A ~ A2] {
+		def makeHandler(context: C) = {
+			val (context1, context2) = ev(context)
+			val handler1 = self makeHandler context1
+			val handler2 = parser2 makeHandler context2
+			new CombinedParserHandler(handler1, handler2)
+		}
+	}
+}
+
+trait Parser[-E, +A] extends ParserForContext[Any, E, A] { self =>
+	def makeHandler(): Handler[E, A, ParserState] = makeHandler(())
+
+	def &[E2 <: E, A2](parser2: Parser[E2, A2]): Parser[E2, A ~ A2] = new Parser[E2, A ~ A2] {
+		def makeHandler(context: Any) = {
+			val handler1 = self makeHandler context
+			val handler2 = parser2 makeHandler context
+			new CombinedParserHandler(handler1, handler2)
+		}
+	}
 }
 
 trait Handler[-E, +A, +S[+ _]] {
@@ -21,7 +45,7 @@ trait Handler[-E, +A, +S[+ _]] {
 	* simply returns a reference to itself.
 	*/
 trait StatelessParser[E, A] extends Parser[E, A] with Handler[E, A, ParserState] {
-	def makeHandler() = this
+	def makeHandler(context: Any) = this
 }
 object StatelessParser {
 	def apply[E, A](
@@ -65,8 +89,26 @@ object Parser {
 		}
 	)
 
+	def done[A](result: Result[A]) = StatelessParser[Any, A](
+		event => Done(result),
+		() => Done(result),
+		err => Done(result)
+	)
+
+
+
+	def inContext[In, E] = new ParserForContext[In, E, In] {
+		def makeHandler(context: In) = new Handler[E, In, ParserState] {
+			// ignore all inputs, just return the result
+			val state = Done(Success(context))
+			def handleEvent(event: E) = state
+			def handleEOF(): ParserState[In] = state
+			def handleError(err: Throwable) = state
+		}
+	}
+
 	def toList[E]: Parser[E, List[E]] = new Parser[E, List[E]] {
-		def makeHandler() = new Handler[E, List[E], ParserState] {
+		def makeHandler(context: Any) = new Handler[E, List[E], ParserState] {
 			val lb = List.newBuilder[E]
 			def handleEvent(event: E) = {
 				lb += event
@@ -77,4 +119,35 @@ object Parser {
 		}
 	}
 
+}
+
+private class CombinedParserHandler[E, A1, A2](
+	handler1: Handler[E, A1, ParserState],
+	handler2: Handler[E, A2, ParserState]
+) extends Handler[E, A1 ~ A2, ParserState] {
+	var state1: ParserState[A1] = Working
+	var state2: ParserState[A2] = Working
+
+	def combinedResult = (state1, state2) match {
+		case (Done(r1), Done(r2)) => Done(for (a1 <- r1; a2 <- r2) yield new ~(a1, a2))
+		case (Done(e: Error), _) => Done(e)
+		case (_, Done(e: Error)) => Done(e)
+		case (Done(Empty), _) | (_, Done(Empty)) => Done(Empty)
+		case (Working, _) | (_, Working) => Working
+	}
+	def handleEvent(event: E): ParserState[A1 ~ A2] = {
+		state1 = handler1 handleEvent event
+		state2 = handler2 handleEvent event
+		combinedResult
+	}
+	def handleEOF(): ParserState[A1 ~ A2] = {
+		state1 = handler1.handleEOF()
+		state2 = handler2.handleEOF()
+		combinedResult
+	}
+	def handleError(err: Throwable): ParserState[A1 ~ A2] = {
+		state1 = handler1.handleError(err)
+		state2 = handler2.handleError(err)
+		combinedResult
+	}
 }

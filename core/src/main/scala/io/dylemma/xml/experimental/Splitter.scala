@@ -1,35 +1,39 @@
 package io.dylemma.xml.experimental
 
-import javax.xml.stream.events.XMLEvent
+import javax.xml.stream.events.{ StartElement => OpenTag, XMLEvent }
 
-import io.dylemma.xml.Result.{ Empty, Error }
+import io.dylemma.xml.Result
+import io.dylemma.xml.Result.{ Success, Empty, Error }
 import io.dylemma.xml.event.EndElement
 
-trait Splitter[E] {
-	def through[A](parser: Parser[E, A]): Transformer[E, A]
+trait Splitter[+In, E] {
+	def through[A](parser: ParserForContext[In, E, A]): Transformer[E, A]
 }
 
-trait StackBasedSplitter extends Splitter[XMLEvent] {
+trait StackBasedSplitter[In] extends Splitter[In, XMLEvent] {
 
 	/** If there's a match, return the remaining (tail) parts of the list
 		* following the matched prefix. Returning `Some(Nil)` implies that
 		* a matching scope has just opened.
 		*/
-	def matchStack(stack: List[Tag]): Option[List[Tag]]
+	def matchStack(stack: List[OpenTag]): Option[(Result[In], List[OpenTag])]
 
-	def through[A](parser: Parser[XMLEvent, A]): Transformer[XMLEvent, A] = new Transformer[XMLEvent, A] {
+	def through[A](parser: ParserForContext[In, XMLEvent, A]): Transformer[XMLEvent, A] = new Transformer[XMLEvent, A] {
 		def makeHandler() = new Handler[XMLEvent, A, TransformerState] {
-			var stack: List[Tag] = Nil
+			var stack: List[OpenTag] = Nil
 			var innerHandler: Option[Handler[XMLEvent, A, ParserState]] = None
 
 			def handleEvent(event: XMLEvent): TransformerState[A] = event match {
 				case _ if event.isStartElement =>
 					// push to the stack
-					val tag = new Tag(event.asStartElement)
-					stack :+= tag
+					stack :+= event.asStartElement
 					if (innerHandler.isEmpty) {
 						matchStack(stack) match {
-							case Some(Nil) => innerHandler = Some(parser.makeHandler())
+							case Some((contextResult, Nil)) => contextResult match {
+								case Success(context) => innerHandler = Some(parser makeHandler context)
+								case Empty => innerHandler = None
+								case Error(err) => innerHandler = Some(Parser.done[A](Error(err)))
+							}
 							case _ =>
 							// Some(list) implies a previous parser already finished
 							// None implies no match for the stack

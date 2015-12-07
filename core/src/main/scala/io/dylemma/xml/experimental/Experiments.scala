@@ -1,9 +1,12 @@
 package io.dylemma.xml.experimental
 
-import javax.xml.stream.events.XMLEvent
+import javax.xml.stream.events.{StartElement => Tag, XMLEvent}
 
+
+import io.dylemma.xml.Result
 import io.dylemma.xml.Result._
 import io.dylemma.xml.event._
+import io.dylemma.xml.{Chain => ~}
 
 object Experiments extends App {
 
@@ -21,7 +24,7 @@ object Experiments extends App {
 	//*****************************************************
 
 	object TextParser extends Parser[XMLEvent, String] {
-		def makeHandler() = new Handler[XMLEvent, String, ParserState] {
+		def makeHandler(context: Any) = new Handler[XMLEvent, String, ParserState] {
 			val sb = new StringBuilder
 			def handleEvent(event: XMLEvent) = {
 				event match {
@@ -37,19 +40,22 @@ object Experiments extends App {
 
 	//*****************************************************
 
-	val mySplitter = new StackBasedSplitter {
-		override def matchStack(stack: List[Tag]): Option[List[Tag]] = stack match {
-			case Tag("A") :: Tag("B") :: list => Some(list)
+	val mySplitter = new StackBasedSplitter[String] {
+		override def matchStack(stack: List[Tag]): Option[(Result[String], List[Tag])] = stack match {
+			case StartElement(Name("A"), _) :: StartElement(Name("B"), _) :: list => Some(Success("ab") -> list)
 			case _ => None
 		}
 	}
 
-	val myTransformer = mySplitter.through(TextParser)
+	val tp: ParserForContext[Any, XMLEvent, String] = TextParser
 
-	val myConsumer = Parser.foreachResult[String]{ result =>
+	val combinedJoiner = TextParser & Parser.inContext[String, XMLEvent]
+
+	val myTransformer = mySplitter.through(combinedJoiner)
+
+	val myConsumer = Parser.foreachResult[String ~ String]{ result =>
 		println(s"RESULT { $result }")
 	}
-
 
 	val result = Stream.ofXml(exampleXml)
 		.logAs("stream")
