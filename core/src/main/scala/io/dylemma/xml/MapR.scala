@@ -20,6 +20,10 @@ trait MapRC[M[_, _]] {
 	def mapR[X, A, B](m: M[X, A], f: Result[A] => Result[B]): M[X, B]
 }
 
+trait MapRC2[M[_, _, _]] {
+	def mapR[X1, X2, A, B](m: M[X1, X2, A], f: Result[A] => Result[B]): M[X1, X2, B]
+}
+
 /** Mixin that adds several result-related transformations to members of the `MapR`
 	* and `MapRC` typeclasses.
 	*/
@@ -35,7 +39,7 @@ trait MapROps extends MapRCOps {
 }
 
 // note: don't merge this directly into MapROps or else there'll be ambiguous implicits
-trait MapRCOps {
+trait MapRCOps extends MapRC2Ops {
 	implicit class Mapper1ROps[M[_, _], X, A](m: M[X, A])(implicit mapper: MapRC[M]) {
 		@inline def mapR[B](f: Result[A] => Result[B]) = mapper.mapR(m, f)
 		def map[B](f: A => B): M[X, B] = mapR(_ map f)
@@ -44,3 +48,16 @@ trait MapRCOps {
 		def recoverWith[A1 >: A](f: PartialFunction[Throwable, Result[A1]]): M[X, A1] = mapR(_ recoverWith f)
 	}
 }
+
+trait MapRC2Ops {
+	implicit class Mapper2ROps[M[_, _, _], X1, X2, A](m: M[X1, X2, A])(implicit mapper: MapRC2[M]) {
+		@inline def mapR[B](f: Result[A] => Result[B]) = mapper.mapR(m, f)
+		def map[B](f: A => B): M[X1, X2, B] = mapR(_ map f)
+		def flatMap[B](f: A => Result[B]): M[X1, X2, B] = mapR(_ flatMap f)
+		def recover[A1 >: A](f: PartialFunction[Throwable, A1]): M[X1, X2, A1] = mapR(_ recover f)
+		def recoverWith[A1 >: A](f: PartialFunction[Throwable, Result[A1]]): M[X1, X2, A1] = mapR(_ recoverWith f)
+
+	}
+}
+
+

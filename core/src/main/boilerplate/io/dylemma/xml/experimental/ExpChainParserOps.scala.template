@@ -1,0 +1,20 @@
+package io.dylemma.xml.experimental
+
+import io.dylemma.xml.{Chain => ~, MapROps}
+
+trait ExpChainParserOps extends MapROps {
+
+	[2..3#/** Docs TODO
+	  * yadda yadda
+	  */
+	implicit class ExpChain1ParserOps[In, E, [#A1#]](parser: ParserForContext[In, E, [#A1# ~ ]]) {
+		def tupled: ParserForContext[In, E, ([#A1#])] = parser map {
+			case [#a1# ~ ] => ([#a1#])
+		}
+		def join[M](f: ([#A1#]) => M): ParserForContext[In, E, M] = parser map {
+			case [#a1# ~ ] => f([#a1#])
+		}
+	}#
+
+	]
+}

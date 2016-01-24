@@ -190,33 +190,33 @@ object Transformer {
 	* @tparam In The context type
 	* @tparam A The type of results in the transformed stream
 	*/
-trait TransformerForContext[In, A] extends TransformerCommon[A] { self =>
-	def toEnumeratee(in: In)(implicit ec: ExecutionContext): Enumeratee[XMLEvent, Result[A]]
-
-	type T[B] = TransformerForContext[In, B]
-	type P[B] = ParserForContext[In, B]
-
-	def parseWith[B](getIteratee: ExecutionContext => Iteratee[Result[A], Result[B]]): ParserForContext[In, B] = {
-		new ParserForContext[In, B] {
-			def toIteratee(context: In)(implicit ec: ExecutionContext) = toEnumeratee(context) transform getIteratee(ec)
-		}
-	}
-
-	def transformWith[B](getEnumeratee: ExecutionContext => Enumeratee[Result[A], Result[B]]): TransformerForContext[In, B] = {
-		new TransformerForContext[In, B] {
-			def toEnumeratee(in: In)(implicit ec: ExecutionContext): Enumeratee[XMLEvent, Result[B]] = {
-				self.toEnumeratee(in) ><> getEnumeratee(ec)
-			}
-		}
-	}
-}
-
-object TransformerForContext {
-	implicit object TransformerForContextMapper extends MapRC[TransformerForContext] {
-		override def mapR[X, A, B](m: TransformerForContext[X, A], f: (Result[A]) => Result[B]): TransformerForContext[X, B] = new TransformerForContext[X, B] {
-			def toEnumeratee(in: X)(implicit ec: ExecutionContext) = {
-				m.toEnumeratee(in) ><> Enumeratee.map(f)
-			}
-		}
-	}
-}
+//trait TransformerForContext[In, A] extends TransformerCommon[A] { self =>
+//	def toEnumeratee(in: In)(implicit ec: ExecutionContext): Enumeratee[XMLEvent, Result[A]]
+//
+//	type T[B] = TransformerForContext[In, B]
+//	type P[B] = ParserForContext[In, B]
+//
+//	def parseWith[B](getIteratee: ExecutionContext => Iteratee[Result[A], Result[B]]): ParserForContext[In, B] = {
+//		new ParserForContext[In, B] {
+//			def toIteratee(context: In)(implicit ec: ExecutionContext) = toEnumeratee(context) transform getIteratee(ec)
+//		}
+//	}
+//
+//	def transformWith[B](getEnumeratee: ExecutionContext => Enumeratee[Result[A], Result[B]]): TransformerForContext[In, B] = {
+//		new TransformerForContext[In, B] {
+//			def toEnumeratee(in: In)(implicit ec: ExecutionContext): Enumeratee[XMLEvent, Result[B]] = {
+//				self.toEnumeratee(in) ><> getEnumeratee(ec)
+//			}
+//		}
+//	}
+//}
+//
+//object TransformerForContext {
+//	implicit object TransformerForContextMapper extends MapRC[TransformerForContext] {
+//		override def mapR[X, A, B](m: TransformerForContext[X, A], f: (Result[A]) => Result[B]): TransformerForContext[X, B] = new TransformerForContext[X, B] {
+//			def toEnumeratee(in: X)(implicit ec: ExecutionContext) = {
+//				m.toEnumeratee(in) ><> Enumeratee.map(f)
+//			}
+//		}
+//	}
+//}

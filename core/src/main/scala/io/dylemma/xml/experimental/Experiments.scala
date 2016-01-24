@@ -40,7 +40,7 @@ object Experiments extends App with ParserCombinerOps {
 
 	//*****************************************************
 
-	val mySplitter = new StackBasedSplitter[String] {
+	val mySplitter = new XmlContextSplitter[String] {
 		override def matchStack(stack: List[Tag]): Option[(Result[String], List[Tag])] = stack match {
 			case StartElement(Name("A"), _) :: StartElement(Name("B"), _) :: list => Some(Success("ab") -> list)
 			case _ => None
@@ -58,12 +58,52 @@ object Experiments extends App with ParserCombinerOps {
 		println(s"RESULT { $result }")
 	}
 
-	val result = Stream.ofXml(exampleXml)
-		.logAs("stream")
-		.transformWith(myTransformer)
-		.drive(myConsumer)
+	case class Comment(postId: Int, user: String, text: String)
+	;{
+		import ParsingDSL.{ParserWithCombine => _, _}
 
-	println(s"END WITH { $result }")
+		val rawXml = s"""<blog>
+		| <post id="1">
+		|  <comment user="bob">Hello there</comment>
+		|  <comment user="alice">Oh, hi</comment>
+		| </post>
+		| <post id="2">
+		|  <comment user="carla">Test comment!</comment>
+		|  <comment user="dylan">I'm testing too!</comment>
+		| </post>
+		|</blog>""".stripMargin
+
+		case class User(name: String)
+		implicit val userParser = ("comment" % "user").map(User)
+
+		case class Content(text: String)
+		/*implicit*/ val contentParser = ("comment" % Text)//.map(Content)
+
+		val splitter = (Root / "blog" / "post" / "comment")
+
+		val userHandler = splitter.foreachResult[String]{
+			user => println(s"Got content: $user")
+		}(contentParser)
+
+		implicit val CommentParser: ParserForContext[Int, XMLEvent, Comment] = (
+			inContext[Int] &
+			(* % "user") &
+			(* % Text)
+		).join(Comment.apply)
+
+		val contextMatcher = Root / "blog" / ("post" & attr("id")) / "comment" map (_.toInt)
+
+		val handler = contextMatcher.foreach[Comment](println)
+		val result = Stream.ofXml(rawXml)/*.logAs("stream")*/.drive(handler)
+		println(s"END WITH { $result }")
+	}
+
+//	val result = Stream.ofXml(exampleXml)
+//		.logAs("stream")
+//		.transformWith(myTransformer)
+//		.drive(myConsumer)
+
+//	println(s"END WITH { $result }")
 
 	//*****************************************************
 

@@ -1,5 +1,7 @@
 package io.dylemma.xml
 
+import javax.xml.stream.events.{StartElement => StaxStartElem}
+
 import io.dylemma.xml.IterateeHelpers.OpenTag
 import io.dylemma.xml.Result._
 
