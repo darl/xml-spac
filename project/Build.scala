@@ -18,6 +18,7 @@ object XmlStreamBuild extends Build {
 		.settings(commonSettings: _*)
 		.settings(libraryDependencies += "com.typesafe.play" %% "play-iteratees" % "2.4.3")
 		.settings(libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test")
+		.settings(libraryDependencies += "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2")
 		.settings(Boilerplate.settings: _*)
 		.settings(apiDocSettings: _*)
 		.settings(publishingSettings: _*)
