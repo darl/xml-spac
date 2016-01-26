@@ -167,19 +167,3 @@ private class TransformedTransformer[A, B, C](f: Transformer[A, B], g: Transform
 		def handleError(err: Throwable) = feedTransformerState(fHandler handleError err)
 	}
 }
-
-private case class ErrorCountState[A](result: Result[A], numErrorsEmitted: Int = 0)
-
-private class ErrorCountingTransformer[A](p: ErrorCountState => Boolean) extends Transformer[A, A] {
-	def makeHandler() = new Handler[A, A, TransformerState] {
-		var errorCountState = ErrorCountState(Empty, 0)
-		var previousState: TransformerState[A] = Working
-
-		def handleEvent(event: A): TransformerState[A] = {
-			if(previousState.isDone) Done(Empty)
-			else Emit(Success(event))
-		}
-		def handleEOF(): TransformerState[A] = Done(Empty)
-		def handleError(err: Throwable): TransformerState[A] = ???
-	}
-}
