@@ -1,6 +1,10 @@
 package io.dylemma.xml.experimental
 
+import javax.xml.namespace.QName
+
 import akka.stream.stage.{TerminationDirective, SyncDirective, Context, PushPullStage}
+import io.dylemma.xml.Result
+import io.dylemma.xml.Result.{Error, Success, Empty}
 
 object HandlerStages {
 
@@ -27,21 +31,78 @@ object HandlerStages {
 		}
 	}
 
-	def collectText: PushPullStage[XmlStackState[_], String] = new PushPullStage[XmlStackState[_], String] {
+	trait XmlHandlingStage[C, T] extends PushPullStage[XmlStackState[C], Result[T]]
+
+	def getContext[T]: XmlHandlingStage[T, T] = new XmlHandlingStage[T, T] {
+		def onPush(s: XmlStackState[T], ctx: Context[Result[T]]) = {
+			ctx.pushAndFinish(s.matchedContext)
+		}
+		def onPull(ctx: Context[Result[T]]) = {
+			if(ctx.isFinishing) ctx.pushAndFinish(Empty)
+			else ctx.pull()
+		}
+		override def onUpstreamFinish(ctx: Context[Result[T]]) = ctx.absorbTermination()
+	}
+
+	def collectText: XmlHandlingStage[Any, String] = new XmlHandlingStage[Any, String] {
 		var sb = new StringBuilder
 
-		def onPush(s: XmlStackState[_], ctx: Context[String]) = {
+		def onPush(s: XmlStackState[Any], ctx: Context[Result[String]]) = {
 			if(s.currentEvent.isCharacters){
 				sb append s.currentEvent.asCharacters.getData
 			}
 			ctx.pull()
 		}
 
-		def onPull(ctx: Context[String]) = {
-			if(ctx.isFinishing) ctx.pushAndFinish(sb.result)
+		def onPull(ctx: Context[Result[String]]) = {
+			if(ctx.isFinishing) ctx.pushAndFinish(Result(sb.result))
 			else ctx.pull()
 		}
 
-		override def onUpstreamFinish(ctx: Context[String]) = ctx.absorbTermination()
+		override def onUpstreamFinish(ctx: Context[Result[String]]) = ctx.absorbTermination()
+	}
+
+	def getMandatoryAttribute(name: QName): XmlHandlingStage[Any, String] = new XmlHandlingStage[Any, String] {
+		def onPush(s: XmlStackState[Any], ctx: Context[Result[String]]) = {
+			if(s.currentEvent.isStartElement){
+				val elem = s.currentEvent.asStartElement
+				val attr = elem.getAttributeByName(name)
+				if(attr == null){
+					val msg = s"$elem missing mandatory '$name' attribute"
+					ctx.pushAndFinish(Error(new IllegalArgumentException(msg)))
+				} else {
+					ctx.pushAndFinish(Result(attr.getValue))
+				}
+			} else {
+				ctx.pull()
+			}
+		}
+		def onPull(ctx: Context[Result[String]]) = {
+			if(ctx.isFinishing) ctx.pushAndFinish(Empty)
+			else ctx.pull()
+		}
+		override def onUpstreamFinish(ctx: Context[Result[String]]) = ctx.absorbTermination()
+	}
+
+	def getOptionalAttribute(name: QName): XmlHandlingStage[Any, Option[String]] = new XmlHandlingStage[Any, Option[String]] {
+		def onPush(s: XmlStackState[Any], ctx: Context[Result[Option[String]]]) = {
+			if(s.currentEvent.isStartElement){
+				val attr = s.currentEvent.asStartElement.getAttributeByName(name)
+				if(attr == null){
+					ctx.pushAndFinish(Success(None))
+				} else {
+					ctx.pushAndFinish(Result(Some(attr.getValue)))
+				}
+			} else {
+				ctx.pull()
+			}
+		}
+
+		def onPull(ctx: Context[Result[Option[String]]]): SyncDirective = {
+			if(ctx.isFinishing) ctx.pushAndFinish(Empty)
+			else ctx.pull()
+		}
+
+		override def onUpstreamFinish(ctx: Context[Result[Option[String]]]) = ctx.absorbTermination()
 	}
 }

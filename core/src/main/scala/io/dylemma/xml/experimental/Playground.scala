@@ -1,5 +1,6 @@
 package io.dylemma.xml.experimental
 
+import javax.xml.namespace.QName
 import javax.xml.stream.events.StartElement
 
 import akka.actor.ActorSystem
@@ -20,7 +21,7 @@ object Playground extends App {
 		|<stuff>
 		|    <a foo="doo" bar="flar">This is my A</a>
 		|    <b>This is my B</b>
-		|    <cs>
+		|    <cs bloop="bleep">
 		|        <c>This is the first C</c>
 		|        <c>This is the second C</c>
 		|    </cs>
@@ -60,7 +61,7 @@ object Playground extends App {
 
 
 	def xmlSplitter[T] = groupByConsecutiveMatches[T]
-		.transform(() => HandlerStages.collectText)
+		.transform(() => HandlerStages.getOptionalAttribute(new QName("bloop")))
 		.concatSubstreams
 
 	val result = xmlSrc via XmlStackState.scanner(matchCSContext) via xmlSplitter runForeach println
