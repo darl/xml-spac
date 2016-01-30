@@ -11,38 +11,38 @@ trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
 
 	/** INTERNAL API.
-		* Used by ParserCombination classes after verifying a MostSpecificType
-		* between this parser's `Context` and another parser's `Context.` Since
-		* we know that `C <: Context` if there is a `MostSpecificType[C, Context, _]`
-		* and because `Context` is contravariant, we can just typecast this parser
-		* instance rather than having to perform an extra runtime mapping step.
-		*/
+	  * Used by ParserCombination classes after verifying a MostSpecificType
+	  * between this parser's `Context` and another parser's `Context.` Since
+	  * we know that `C <: Context` if there is a `MostSpecificType[C, Context, _]`
+	  * and because `Context` is contravariant, we can just typecast this parser
+	  * instance rather than having to perform an extra runtime mapping step.
+	  */
 	private[xml] def unsafeCastContext[C] = this.asInstanceOf[Parser[C, T]]
 
 	/** Create a new Parser that feeds results from this parser through a
-		* transformation function (`f`).
-		*
-		* @param f A function to transform parser results
-		* @return A new parser whose results have been transformed by `f`
-		*/
+	  * transformation function (`f`).
+	  *
+	  * @param f A function to transform parser results
+	  * @return A new parser whose results have been transformed by `f`
+	  */
 	def map[U](f: T => U) = Parser.fromFlow(asFlow map (_.map(f)))
 
 	/** Low-level version of `map`, where the raw `Result` values are
-		* passed through `f`.
-		*
-		* @param f A function to transform raw parser results
-		* @return A new parser whose results have been transformed by `f`
-		*/
+	  * passed through `f`.
+	  *
+	  * @param f A function to transform raw parser results
+	  * @return A new parser whose results have been transformed by `f`
+	  */
 	def mapResult[U](f: Result[T] => Result[U]) = Parser.fromFlow(asFlow map f)
 
 	/** Create a new parser that transforms incoming "context" values with
-		* the given transformation function `f`.
-		*
-		* @param f A function to transform context inputs
-		* @tparam C The type of the context supported by the returned parser
-		* @return A parser that accepts events with context type `C` by passing
-		*         their context values through `f` before feeding them to this parser.
-		*/
+	  * the given transformation function `f`.
+	  *
+	  * @param f A function to transform context inputs
+	  * @tparam C The type of the context supported by the returned parser
+	  * @return A parser that accepts events with context type `C` by passing
+	  *         their context values through `f` before feeding them to this parser.
+	  */
 	def adaptContext[C](f: C => Context): Parser[C, T] = Parser.fromFlow {
 		Flow[XmlStackState[C]] map { stackState =>
 			val context = stackState.matchedContext.map(f)
@@ -51,14 +51,14 @@ trait Parser[-Context, +T] { self =>
 	}
 
 	/** Explicitly provide a Context value to this parser.
-		* The returned parser will ignore any actual context values, using the
-		* provided `context` instead. The returned parser can then be attached
-		* to any context.
-		*
-		* @param context The provided Context value
-		* @return A parser that ignores input contests, using the provided
-		*         `context` instead
-		*/
+	  * The returned parser will ignore any actual context values, using the
+	  * provided `context` instead. The returned parser can then be attached
+	  * to any context.
+	  *
+	  * @param context The provided Context value
+	  * @return A parser that ignores input contests, using the provided
+	  *         `context` instead
+	  */
 	def inContext(context: Context): Parser[Any, T] = adaptContext(_ => context)
 }
 
