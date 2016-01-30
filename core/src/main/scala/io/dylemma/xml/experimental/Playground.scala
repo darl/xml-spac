@@ -4,8 +4,8 @@ import javax.xml.namespace.QName
 import javax.xml.stream.events.StartElement
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{Flow, Sink}
+import akka.stream.{FlowShape, ActorMaterializer}
+import akka.stream.scaladsl._
 import io.dylemma.xml.Result
 import io.dylemma.xml.Result.{Empty, Success}
 
@@ -59,9 +59,28 @@ object Playground extends App {
 	def toListSink[T] = Sink.fold[List[T], T](Nil)(_ :+ _)
 	def toListFlow[T] = Flow[T].fold[List[T]](Nil)(_ :+ _)
 
+	def complexParserFlow[T] = Flow.fromGraph(GraphDSL.create(){ implicit b =>
+		import GraphDSL.Implicits._
+
+		// prepare graph elements
+		val broadcast = b.add(Broadcast[XmlStackState[T]](2))
+		val zip = b.add(ZipWith[Result[Option[String]], Result[String], String]{
+			case (attr, text) => s"cs: attr=$attr, text=${text.map(_.replaceAllLiterally("\n", "\\n"))}"
+		})
+
+		val attrParser = Parser.forOptionalAttribute("bloop")
+		val textParser = Parser.forText
+
+		// connect the graph
+		broadcast.out(0).via(attrParser.asFlow) ~> zip.in0
+		broadcast.out(1).via(textParser.asFlow) ~> zip.in1
+
+		FlowShape(broadcast.in, zip.out)
+	})
+
 
 	def xmlSplitter[T] = groupByConsecutiveMatches[T]
-		.transform(() => HandlerStages.getOptionalAttribute(new QName("bloop")))
+		.via(complexParserFlow)
 		.concatSubstreams
 
 	val result = xmlSrc via XmlStackState.scanner(matchCSContext) via xmlSplitter runForeach println
