@@ -7,7 +7,7 @@ import akka.stream.stage.{SyncDirective, Context, PushPullStage}
 import io.dylemma.xml.Result
 import io.dylemma.xml.Result.{Success, Error, Empty}
 
-trait Parser[-Context, +T] {
+trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
 
 	/** INTERNAL API.
@@ -18,6 +18,48 @@ trait Parser[-Context, +T] {
 		* instance rather than having to perform an extra runtime mapping step.
 		*/
 	private[xml] def unsafeCastContext[C] = this.asInstanceOf[Parser[C, T]]
+
+	/** Create a new Parser that feeds results from this parser through a
+		* transformation function (`f`).
+		*
+		* @param f A function to transform parser results
+		* @return A new parser whose results have been transformed by `f`
+		*/
+	def map[U](f: T => U) = Parser.fromFlow(asFlow map (_.map(f)))
+
+	/** Low-level version of `map`, where the raw `Result` values are
+		* passed through `f`.
+		*
+		* @param f A function to transform raw parser results
+		* @return A new parser whose results have been transformed by `f`
+		*/
+	def mapResult[U](f: Result[T] => Result[U]) = Parser.fromFlow(asFlow map f)
+
+	/** Create a new parser that transforms incoming "context" values with
+		* the given transformation function `f`.
+		*
+		* @param f A function to transform context inputs
+		* @tparam C The type of the context supported by the returned parser
+		* @return A parser that accepts events with context type `C` by passing
+		*         their context values through `f` before feeding them to this parser.
+		*/
+	def adaptContext[C](f: C => Context): Parser[C, T] = Parser.fromFlow {
+		Flow[XmlStackState[C]] map { stackState =>
+			val context = stackState.matchedContext.map(f)
+			stackState.copy(matchedContext = context)
+		} via asFlow
+	}
+
+	/** Explicitly provide a Context value to this parser.
+		* The returned parser will ignore any actual context values, using the
+		* provided `context` instead. The returned parser can then be attached
+		* to any context.
+		*
+		* @param context The provided Context value
+		* @return A parser that ignores input contests, using the provided
+		*         `context` instead
+		*/
+	def inContext(context: Context): Parser[Any, T] = adaptContext(_ => context)
 }
 
 object Parser {
@@ -30,6 +72,10 @@ object Parser {
 			else ctx.pull()
 		}
 		override def onUpstreamFinish(ctx: Context[Result[T]]) = ctx.absorbTermination()
+	}
+
+	def fromFlow[C, T](flow: Flow[XmlStackState[C], Result[T], Unit]): Parser[C, T] = {
+		new Parser[C, T]{ def asFlow = flow }
 	}
 
 	/** Convenience function to create Parsers based on a PushPullStage factory function.

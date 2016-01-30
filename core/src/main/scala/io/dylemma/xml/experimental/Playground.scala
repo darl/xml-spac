@@ -61,11 +61,15 @@ object Playground extends App {
 	def toListSink[T] = Sink.fold[List[T], T](Nil)(_ :+ _)
 	def toListFlow[T] = Flow[T].fold[List[T]](Nil)(_ :+ _)
 
-	val complexParser = Parser.forOptionalAttribute("bloop") ~ Parser.forText join {
-		case (attr, text) => s"cs: attr=$attr, text=$text}"
+	val complexParser = (
+		Parser.forOptionalAttribute("bloop") ~
+		Parser.forText ~
+		Parser.forContext[String]
+	) join {
+		case (context, attr, text) => s"cs: context=$context attr=$attr, text=$text}"
 	}
 
-	def xmlSplitter[T] = groupByConsecutiveMatches[T]
+	def xmlSplitter = groupByConsecutiveMatches[String]
 		.via(complexParser.asFlow)
 		.concatSubstreams
 
