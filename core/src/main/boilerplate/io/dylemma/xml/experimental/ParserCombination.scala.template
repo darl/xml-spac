@@ -1,0 +1,56 @@
+package io.dylemma.xml.experimental
+
+import akka.stream.FlowShape
+import akka.stream.scaladsl.{ZipWith, Broadcast, GraphDSL, Flow}
+import io.dylemma.xml.Result
+
+object ParserCombination extends ParserCombination
+trait ParserCombination {
+
+	[2..20#class CompoundParser1[Context, [#T1#]]([#val parser1: Parser[Context, T1]#]) {
+		def join[T](f: ([#T1#]) => T): Parser[Context, T] = new Parser[Context, T] {
+			def asFlow = Flow.fromGraph(GraphDSL.create(){ implicit b =>
+				import GraphDSL.Implicits._
+
+				// setup the fan-out and fan-in stages
+				val broadcast = b.add(Broadcast[XmlStackState[Context]](1))
+				val zip = b.add(ZipWith[[#Result[T1]#], Result[T]]{ ([#r1#]) =>
+					for {
+						[#t1 <- r1#
+						]
+					} yield f([#t1#])
+				})
+
+				// connect the fan ends via the parsers
+				[#broadcast.out(0).via(parser1.asFlow) ~> zip.in0#
+				]
+
+				FlowShape(broadcast.in, zip.out)
+			})
+		}
+
+		def tupled = join(Tuple1.apply)
+	}#
+
+	]
+
+	/** Provide the `~` operator to combine two parsers */
+	implicit class ParserCombineOps[C1, T1](parser1: Parser[C1, T1]) {
+		def ~[Context, C2, T2](parser2: Parser[C2, T2])(implicit mst: MostSpecificType[Context, C1, C2]) = {
+			new CompoundParser2[Context, T1, T2](parser1.unsafeCastContext[Context], parser2.unsafeCastContext[Context])
+		}
+	}
+
+	[2..19#/** Provide the `~` operator to combine another parser to an existing CompoundParser */
+	implicit class Parser1CombineOps[Ca, [#T1#]](cp: CompoundParser1[Ca, [#T1#]]) {
+		def ~[Context, Cb, T2](p: Parser[Cb, T2])(implicit msg: MostSpecificType[Context, Ca, Cb]) = {
+			new CompoundParser2[Context, [#T1#], T2](
+				[#cp.parser1.unsafeCastContext[Context]#,
+				],
+				p.unsafeCastContext[Context]
+			)
+		}
+	}#
+
+	]
+}

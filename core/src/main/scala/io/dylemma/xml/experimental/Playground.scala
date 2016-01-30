@@ -12,6 +12,8 @@ import io.dylemma.xml.Result.{Empty, Success}
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import ParserCombination._
+
 object Playground extends App {
 
 	implicit val system = ActorSystem("reactive-playground")
@@ -59,28 +61,12 @@ object Playground extends App {
 	def toListSink[T] = Sink.fold[List[T], T](Nil)(_ :+ _)
 	def toListFlow[T] = Flow[T].fold[List[T]](Nil)(_ :+ _)
 
-	def complexParserFlow[T] = Flow.fromGraph(GraphDSL.create(){ implicit b =>
-		import GraphDSL.Implicits._
-
-		// prepare graph elements
-		val broadcast = b.add(Broadcast[XmlStackState[T]](2))
-		val zip = b.add(ZipWith[Result[Option[String]], Result[String], String]{
-			case (attr, text) => s"cs: attr=$attr, text=${text.map(_.replaceAllLiterally("\n", "\\n"))}"
-		})
-
-		val attrParser = Parser.forOptionalAttribute("bloop")
-		val textParser = Parser.forText
-
-		// connect the graph
-		broadcast.out(0).via(attrParser.asFlow) ~> zip.in0
-		broadcast.out(1).via(textParser.asFlow) ~> zip.in1
-
-		FlowShape(broadcast.in, zip.out)
-	})
-
+	val complexParser = Parser.forOptionalAttribute("bloop") ~ Parser.forText join {
+		case (attr, text) => s"cs: attr=$attr, text=$text}"
+	}
 
 	def xmlSplitter[T] = groupByConsecutiveMatches[T]
-		.via(complexParserFlow)
+		.via(complexParser.asFlow)
 		.concatSubstreams
 
 	val result = xmlSrc via XmlStackState.scanner(matchCSContext) via xmlSplitter runForeach println

@@ -9,6 +9,15 @@ import io.dylemma.xml.Result.{Success, Error, Empty}
 
 trait Parser[-Context, +T] {
 	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
+
+	/** INTERNAL API.
+		* Used by ParserCombination classes after verifying a MostSpecificType
+		* between this parser's `Context` and another parser's `Context.` Since
+		* we know that `C <: Context` if there is a `MostSpecificType[C, Context, _]`
+		* and because `Context` is contravariant, we can just typecast this parser
+		* instance rather than having to perform an extra runtime mapping step.
+		*/
+	private[xml] def unsafeCastContext[C] = this.asInstanceOf[Parser[C, T]]
 }
 
 object Parser {
