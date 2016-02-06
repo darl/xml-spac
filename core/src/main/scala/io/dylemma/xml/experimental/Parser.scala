@@ -12,7 +12,7 @@ trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
 
 	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], Unit] = {
-		XmlStackState.scanner(_ => Success(ev())) via asFlow
+		XmlStackState.scanner(_ => Success(ev(()))) via asFlow
 	}
 
 	/** INTERNAL API.

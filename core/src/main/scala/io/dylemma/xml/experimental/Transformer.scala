@@ -62,15 +62,13 @@ object Transformer {
 }
 
 trait Splitter[+Context] {
-	type P[A] = Parser[Context, A]
 
-	def through[Out](parser: P[Out]): Transformer[Out]
+	def through[Out](parser: Parser[Context, Out]): Transformer[Out]
 
 	// methods for feeding results through an 'inner' parser to obtain results
-	@inline private def thru[Out: P] = through(implicitly[P[Out]])
-	@inline def as[Out: P] = thru[Out].parseFirst
-	@inline def asOptional[Out: P] = thru[Out].parseFirstOption
-	@inline def asList[Out: P] = thru[Out].parseToList
+	@inline def as[Out](implicit parser: Parser[Context, Out]) = through(parser).parseFirst
+	@inline def asOptional[Out](implicit parser: Parser[Context, Out]) = through(parser).parseFirstOption
+	@inline def asList[Out](implicit parser: Parser[Context, Out]) = through(parser).parseToList
 
 	// methods for obtaining the values of attributes from incoming elements
 	@inline def attr(name: String) = through(Parser forAttribute name).parseFirst
