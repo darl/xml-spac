@@ -70,6 +70,6 @@ object XmlStackState {
 				// just update the currentEvent, not touching the stack or match states
 				state.copy(currentEvent = event)
 			}
-		}
+		}.drop(1) // drop the 'initial' state to avoid accidentally passing a `null` through a stream
 	}
 }

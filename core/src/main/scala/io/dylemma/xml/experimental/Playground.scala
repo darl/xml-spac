@@ -1,18 +1,14 @@
 package io.dylemma.xml.experimental
 
-import javax.xml.namespace.QName
 import javax.xml.stream.events.StartElement
 
 import akka.actor.ActorSystem
-import akka.stream.{FlowShape, ActorMaterializer}
-import akka.stream.scaladsl._
-import io.dylemma.xml.Result
-import io.dylemma.xml.Result.{Empty, Success}
+import akka.stream.ActorMaterializer
+import io.dylemma.xml.Result.{Empty, Error, Success}
+import io.dylemma.xml.experimental.ParserCombination._
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import ParserCombination._
 
 object Playground extends App {
 
@@ -33,33 +29,13 @@ object Playground extends App {
 		|    </cs>
 		|</stuff>""".stripMargin
 
-	def matchCSContext(stack: List[StartElement]): Result[String] = stack match {
-		case e1 :: e2 :: _ =>
-			if(e1.getName.getLocalPart == "stuff" && e2.getName.getLocalPart == "cs")
-				Success("yay")
-			else
-				Empty
-		case _ =>
-			Empty
-	}
+	val splitter = new SingleElementContextMatcher[Unit] {
+		protected def matchElement(elem: StartElement) = if(elem.getName.getLocalPart == "stuff") Success(()) else Empty
+	} / (new SingleElementContextMatcher[Unit] {
+		protected def matchElement(elem: StartElement) = if(elem.getName.getLocalPart == "cs") Success(()) else Empty
+	}) mapContext { _ => "yay" }
 
 	val xmlSrc = XmlEventPublisher(rawXml)
-
-	// split when the current value matches and the previous didn't
-	case class SplitterState[T](previousDidMatch: Boolean, currentMatches: Boolean, current: T) {
-		def advance(item: T, matches: Boolean) = SplitterState(currentMatches, matches, item)
-		def isNewlyMatched = currentMatches && !previousDidMatch
-	}
-
-	def groupByConsecutiveMatches[T] = Flow[XmlStackState[T]]
-		.scan(SplitterState(false, false, XmlStackState.initial[T])){ (state, next) => state.advance(next, next.matchedContext.isSuccess) }
-		.dropWhile(!_.currentMatches)
-		.splitWhen(_.isNewlyMatched)
-		.takeWhile(_.currentMatches)
-		.map(_.current)
-
-	def toListSink[T] = Sink.fold[List[T], T](Nil)(_ :+ _)
-	def toListFlow[T] = Flow[T].fold[List[T]](Nil)(_ :+ _)
 
 	val complexParser = (
 		Parser.forOptionalAttribute("bloop") ~
@@ -69,13 +45,19 @@ object Playground extends App {
 		case (context, attr, text) => s"cs: context=$context attr=$attr, text=$text}"
 	}
 
-	def xmlSplitter = groupByConsecutiveMatches[String]
-		.via(complexParser.asFlow)
-		.concatSubstreams
+	val transformerFlow = splitter.asList(complexParser).asRawFlow
 
-	val result = xmlSrc via XmlStackState.scanner(matchCSContext) via xmlSplitter runForeach println
+	val result = xmlSrc.via(transformerFlow).runForeach { r =>
+		r match {
+			case Error(err) => err.printStackTrace()
+			case x => println(x)
+		}
+	}
 
 	Await.ready(result, 5.seconds)
-	println(result.value)
+	result.value.get match {
+		case util.Success(list) => println(list)
+		case util.Failure(err) => err.printStackTrace()
+	}
 	system.shutdown()
 }

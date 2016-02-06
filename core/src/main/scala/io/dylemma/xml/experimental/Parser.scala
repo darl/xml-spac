@@ -1,6 +1,7 @@
 package io.dylemma.xml.experimental
 
 import javax.xml.namespace.QName
+import javax.xml.stream.events.XMLEvent
 
 import akka.stream.scaladsl.Flow
 import akka.stream.stage.{SyncDirective, Context, PushPullStage}
@@ -9,6 +10,10 @@ import io.dylemma.xml.Result.{Success, Error, Empty}
 
 trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
+
+	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], Unit] = {
+		XmlStackState.scanner(_ => Success(ev())) via asFlow
+	}
 
 	/** INTERNAL API.
 	  * Used by ParserCombination classes after verifying a MostSpecificType

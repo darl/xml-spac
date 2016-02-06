@@ -1,46 +1,59 @@
 package io.dylemma.xml.experimental
 
-import javax.xml.stream.events.XMLEvent
+import javax.xml.namespace.QName
+import javax.xml.stream.events.{StartElement, XMLEvent}
 
 import akka.stream.scaladsl.Flow
 import io.dylemma.xml.Result
 
+import scala.collection.generic.CanBuildFrom
+
 /**
 	* Created by dylan on 1/30/2016.
 	*/
-trait Transformer[A] {
+trait Transformer[A] { self =>
 
 	def asFlow: Flow[XMLEvent, Result[A], Unit]
-}
 
-
-trait Splitter[+Context] {
-	def through[Out](parser: Parser[Context, Out]): Transformer[Out]
-
-
-}
-
-class XmlSplitterImpl[Context](contextMatcher: ContextMatcher[Context]) extends Splitter[Context] {
-	def through[Out](parser: Parser[Context, Out]) = new XmlTransformerImpl(contextMatcher, parser)
-}
-
-class XmlTransformerImpl[Context, Out](
-	contextMatcher: ContextMatcher[Context],
-	innerParser: Parser[Context, Out]
-) extends Transformer[Out] {
-	import XmlTransformerImpl._
-
-	def asFlow: Flow[XMLEvent, Result[Out], Unit] = {
-		val stateScanner = XmlStackState.scanner(contextMatcher)
-		val splitterFlow = groupByConsecutiveMatches[Context]
-			.via(innerParser.asFlow)
-			.concatSubstreams
-		stateScanner via splitterFlow
+	def parseWith[B](parserFlow: Flow[Result[A], Result[B], Unit]): Parser[Any, B] = Parser.fromFlow {
+		Flow[XmlStackState[Any]].map(_.currentEvent).via(self.asFlow).via(parserFlow)
 	}
+
+	def transformWith[B](transformerFlow: Flow[Result[A], Result[B], Unit]): Transformer[B] = {
+		new Transformer[B] {
+			def asFlow = self.asFlow via transformerFlow
+		}
+	}
+
+	@inline def parseFirst = parseWith(FlowHelpers.first)
+	@inline def parseFirstOption = parseWith(FlowHelpers.firstOption)
+	@inline def parseToList = parseWith(FlowHelpers.toList)
+	@inline def parseConcat[B, That]()(implicit t: A => TraversableOnce[B], bf: CanBuildFrom[A, B, That]) = {
+		parseWith(FlowHelpers.concat)
+	}
+	@inline def takeUntilFirstError = transformWith(FlowHelpers.takeUntilNthError(1))
+	@inline def takeUntilNthError(n: Int) = transformWith(FlowHelpers.takeUntilNthError(n))
+	@inline def takeThroughFirstError = transformWith(FlowHelpers.takeThroughNthError(1))
+	@inline def takeThroughNthError(n: Int) = transformWith(FlowHelpers.takeThroughNthError(n))
 }
 
-object XmlTransformerImpl {
-	def groupByConsecutiveMatches[T] = Flow[XmlStackState[T]]
+object Transformer {
+	def fromFlow[A](flow: Flow[XMLEvent, Result[A], Unit]): Transformer[A] = {
+		new Transformer[A]{ def asFlow = flow }
+	}
+
+	def fromSplitterAndJoiner[Context, A](splitter: ContextMatcher[Context], joiner: Parser[Context, A]): Transformer[A] = {
+		val stateScanner = XmlStackState.scanner(splitter.apply)
+		val splitterFlow = groupByConsecutiveMatches[Context].via(joiner.asFlow).concatSubstreams
+		fromFlow(stateScanner via splitterFlow)
+	}
+
+	private case class SplitterState[T](previousDidMatch: Boolean, currentMatches: Boolean, current: T) {
+		def advance(item: T, matches: Boolean) = SplitterState(currentMatches, matches, item)
+		def isNewlyMatched = currentMatches && !previousDidMatch
+	}
+
+	private def groupByConsecutiveMatches[T] = Flow[XmlStackState[T]]
 		.scan(SplitterState(false, false, XmlStackState.initial[T])){ (state, next) => state.advance(next, next.matchedContext.isSuccess) }
 		.dropWhile(!_.currentMatches)
 		.splitWhen(_.isNewlyMatched)
@@ -48,7 +61,29 @@ object XmlTransformerImpl {
 		.map(_.current)
 }
 
-private[xml] case class SplitterState[T](previousDidMatch: Boolean, currentMatches: Boolean, current: T) {
-	def advance(item: T, matches: Boolean) = SplitterState(currentMatches, matches, item)
-	def isNewlyMatched = currentMatches && !previousDidMatch
+trait Splitter[+Context] {
+	type P[A] = Parser[Context, A]
+
+	def through[Out](parser: P[Out]): Transformer[Out]
+
+	// methods for feeding results through an 'inner' parser to obtain results
+	@inline private def thru[Out: P] = through(implicitly[P[Out]])
+	@inline def as[Out: P] = thru[Out].parseFirst
+	@inline def asOptional[Out: P] = thru[Out].parseFirstOption
+	@inline def asList[Out: P] = thru[Out].parseToList
+
+	// methods for obtaining the values of attributes from incoming elements
+	@inline def attr(name: String) = through(Parser forAttribute name).parseFirst
+	@inline def %(name: String) = attr(name)
+	@inline def attr(qname: QName) = through(Parser forAttribute qname).parseFirst
+	@inline def %(qname: QName) = attr(qname)
+
+	// methods for obtaining the values of optional attributes from incoming elements
+	@inline def attrOpt(name: String) = through(Parser forOptionalAttribute name).parseFirst
+	@inline def %?(name: String) = attrOpt(name)
+	@inline def attrOpt(qname: QName) = through(Parser forOptionalAttribute qname).parseFirst
+	@inline def %?(qname: QName) = attrOpt(qname)
+
+	// methods for obtaining the text content from incoming elements
+	@inline def text = through(Parser.forText).parseConcat()
 }

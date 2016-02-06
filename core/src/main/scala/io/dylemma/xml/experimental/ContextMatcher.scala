@@ -11,14 +11,18 @@ import io.dylemma.xml.{ContextCombiner, Result}
   *
   * @tparam A The type of the extracted context.
   */
-trait ContextMatcher[+A] extends (List[StartElement] => Result[A]) { self =>
+trait ContextMatcher[+A] extends Splitter[A] with (List[StartElement] => Result[A]) { self =>
 
-	def map[B](f: A => B): ContextMatcher[B] = new ContextMatcher[B] {
+	def mapContext[B](f: A => B): ContextMatcher[B] = new ContextMatcher[B] {
 		def apply(stack: List[StartElement]) = self(stack).map(f)
 	}
 
-	def mapResult[B](f: Result[A] => Result[B]): ContextMatcher[B] = new ContextMatcher[B] {
+	def rmapContext[B](f: Result[A] => Result[B]): ContextMatcher[B] = new ContextMatcher[B] {
 		def apply(stack: List[StartElement]) = f(self(stack))
+	}
+
+	def through[Out](parser: Parser[A, Out]): Transformer[Out] = {
+		Transformer.fromSplitterAndJoiner(this, parser)
 	}
 }
 
@@ -75,8 +79,11 @@ trait SingleElementContextMatcher[+A] extends ChainingContextMatcher[A] { self =
 		}
 	}
 
-	override def map[B](f: A => B): Match1[B] = new Match1[B] {
+	override def mapContext[B](f: A => B): Match1[B] = new Match1[B] {
 		protected def matchElement(elem: StartElement) = self.matchElement(elem).map(f)
+	}
+	override def rmapContext[B](f: Result[A] => Result[B]): Match1[B] = new Match1[B] {
+		protected def matchElement(elem: StartElement) = f(self matchElement elem)
 	}
 
 	// common functionality for the [and]extract[q]name functions
