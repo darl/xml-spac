@@ -45,7 +45,7 @@ object FlowHelpers {
 
 	def firstOption[A] = fromParsingStage{() =>
 		new ParsingStage[A, Option[A]] {
-			override protected val endResult = Success(None)
+			override protected val endResult = Success.none
 
 			def onPush(elem: Result[A], ctx: Context[Result[Option[A]]]) = {
 				if(elem.isEmpty) ctx.pull()

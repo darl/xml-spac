@@ -83,5 +83,8 @@ trait Splitter[+Context] {
 	@inline def %?(qname: QName) = attrOpt(qname)
 
 	// methods for obtaining the text content from incoming elements
-	@inline def text = through(Parser.forText).parseConcat()
+	@inline def text = through(Parser.forText)
+	@inline def textConcat = text.parseConcat()
+	@inline def textOption = text.parseFirstOption
+	@inline def textList = text.parseToList
 }

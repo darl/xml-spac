@@ -9,6 +9,7 @@ import io.dylemma.xml.experimental.ParserCombination._
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import ParsingDSL._
 
 object Playground extends App {
 
@@ -29,20 +30,16 @@ object Playground extends App {
 		|    </cs>
 		|</stuff>""".stripMargin
 
-	val splitter = new SingleElementContextMatcher[Unit] {
-		protected def matchElement(elem: StartElement) = if(elem.getName.getLocalPart == "stuff") Success(()) else Empty
-	} / (new SingleElementContextMatcher[Unit] {
-		protected def matchElement(elem: StartElement) = if(elem.getName.getLocalPart == "cs") Success(()) else Empty
-	}) mapContext { _ => "yay" }
-
 	val xmlSrc = XmlEventPublisher(rawXml)
 
+	val splitter = "stuff" / "cs" mapContext { _ => "yay" }
+
 	val complexParser = (
-		Parser.forOptionalAttribute("bloop") ~
-		Parser.forText ~
-		Parser.forContext[String]
-	) join {
-		case (context, attr, text) => s"cs: context=$context attr=$attr, text=$text}"
+		inContext[String] ~
+		(* %? "bloop") ~
+		(* % Text)
+	) join { (context, attr, text) =>
+		s"cs: context=$context attr=$attr, text=$text}"
 	}
 
 	val transformerFlow = splitter.asList(complexParser).asRawFlow

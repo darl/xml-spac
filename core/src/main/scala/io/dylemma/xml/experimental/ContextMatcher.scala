@@ -2,7 +2,7 @@ package io.dylemma.xml.experimental
 
 import javax.xml.stream.events.StartElement
 
-import io.dylemma.xml.Result.Empty
+import io.dylemma.xml.Result.{Success, Empty}
 import io.dylemma.xml.{ContextCombiner, Result}
 
 /** A function that attempts to extract a "context" value from an XML stack.
@@ -98,4 +98,20 @@ trait SingleElementContextMatcher[+A] extends ChainingContextMatcher[A] { self =
 
 	def andExtractQName = expandMatch { case (a, elem) => a -> elem.getName }
 	def andExtractName = expandMatch { case (a, elem) => a -> elem.getName.getLocalPart }
+}
+
+object SingleElementContextMatcher {
+	def predicate(f: StartElement => Boolean): SingleElementContextMatcher[Unit] = {
+		new SingleElementContextMatcher[Unit] {
+			protected def matchElement(elem: StartElement) = {
+				if(f(elem)) Success.unit else Empty
+			}
+		}
+	}
+
+	def apply[A](f: StartElement => Option[A]): SingleElementContextMatcher[A] = {
+		new SingleElementContextMatcher[A] {
+			protected def matchElement(elem: StartElement) = Result fromOption f(elem)
+		}
+	}
 }

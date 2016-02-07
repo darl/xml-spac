@@ -94,6 +94,10 @@ object Result {
 		def toOption = Some(result)
 		def toTry = scala.util.Success(result)
 	}
+	object Success {
+		lazy val unit = Success(())
+		lazy val none = Success(None)
+	}
 
 	@inline private def tryDo[U](work: => Result[U]): Result[U] = {
 		try { work } catch { case NonFatal(err) => Error(err) }
