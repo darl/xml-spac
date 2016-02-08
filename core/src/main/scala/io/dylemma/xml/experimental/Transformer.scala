@@ -30,6 +30,10 @@ trait Transformer[A, B] { self =>
 		parseWith { Parser.concat() }
 	}
 
+	@inline def takeThroughNthError(n: Int): Transformer[A, B] = transformWith(Transformer.takeThroughNthError(n))
+	@inline def takeThroughFirstError: Transformer[A, B] = transformWith(Transformer.takeThroughFirstError)
+	@inline def takeUntilNthError(n: Int): Transformer[A, B] = transformWith(Transformer.takeUntilNthError(n))
+	@inline def takeUntilFirstError(n: Int): Transformer[A, B] = transformWith(Transformer.takeUntilFirstError)
 }
 
 private class MappedTransformerHandler[E, A, B](
@@ -61,45 +65,32 @@ object StatelessTransformer {
 	}
 }
 
-//trait StatefulTransformer[E, S[_]] {
-//	def stateHandler: Handler[E, E, S]
-//}
+private class TakeThroughNthErrorTransformer[A](n: Int) extends Transformer[A, A] {
+	def makeHandler() = new Handler[A, A, TransformerState] {
+		var numErrors = 0
 
-//private case class ErrorCountState[+A](result: Result[A], numErrorsEmitted: Int = 0)
-//
-//class ErrorCountHandler[E] extends Handler[E, E, ErrorCountState] {
-//	private var current = ErrorCountState(Empty, 0)
-//
-//	def handleEvent(event: E): ErrorCountState[E] = ErrorCountState(Success(event), current.numErrorsEmitted)
-//	def handleEOF(): ErrorCountState[E] = current
-//	def handleError(err: Throwable): ErrorCountState[E] = ErrorCountState(Error(err), current.numErrorsEmitted + 1)
-//}
-//
-//private class TakeThroughNthErrorTransformer[A](n: Int) extends Transformer[A, A] {
-//	def makeHandler() = new Handler[A, A, TransformerState] {
-//		var numErrors = 0
-//
-//		def handleEvent(event: A): TransformerState[A] = {
-//
-//		}
-//		def handleEOF(): TransformerState[A] = ???
-//		def handleError(err: Throwable): TransformerState[A] = ???
-//	}
-//}
-//
-//private class ErrorCountingTransformer[A](p: ErrorCountState => Boolean) extends Transformer[A, A] {
-//	def makeHandler() = new Handler[A, A, TransformerState] {
-//		var errorCountState = ErrorCountState(Empty, 0)
-//		var previousState: TransformerState[A] = Working
-//
-//		def handleEvent(event: A): TransformerState[A] = {
-//			if(previousState.isDone) Done(Empty)
-//			else Emit(Success(event))
-//		}
-//		def handleEOF(): TransformerState[A] = Done(Empty)
-//		def handleError(err: Throwable): TransformerState[A] = ???
-//	}
-//}
+		def handleEvent(event: A) = Emit(Success(event))
+		def handleEOF() = Done(Empty)
+		def handleError(err: Throwable) = {
+			numErrors += 1
+			if(numErrors >= n) Done(Error(err))
+			else Emit(Error(err))
+		}
+	}
+}
+
+private class TakeUntilNthErrorTransformer[A](n: Int) extends Transformer[A, A] {
+	def makeHandler() = new Handler[A, A, TransformerState] {
+		var numErrors = 0
+		def handleEvent(event: A) = Emit(Success(event))
+		def handleEOF() = Done(Empty)
+		def handleError(err: Throwable) = {
+			numErrors += 1
+			if(numErrors >= n) Done(Empty)
+			else Emit(Error(err))
+		}
+	}
+}
 
 object Transformer {
 
@@ -109,5 +100,9 @@ object Transformer {
 		(err) => Done(Error(err))
 	)
 
+	def takeUntilNthError[A](n: Int): Transformer[A, A] = new TakeUntilNthErrorTransformer[A](n)
+	def takeUntilFirstError[A]: Transformer[A, A] = takeUntilNthError[A](1)
+	def takeThroughNthError[A](n: Int): Transformer[A, A] = new TakeThroughNthErrorTransformer[A](n)
+	def takeThroughFirstError[A]: Transformer[A, A] = takeThroughNthError(1)
 
 }
