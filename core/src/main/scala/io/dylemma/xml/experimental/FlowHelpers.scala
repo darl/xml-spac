@@ -22,7 +22,7 @@ object FlowHelpers {
 		override def onUpstreamFinish(ctx: Context[Result[B]]) = ctx.absorbTermination()
 	}
 
-	def fromParsingStage[A, B](makeStage: () => ParsingStage[A, B]): Flow[Result[A], Result[B], Unit] = {
+	def fromParsingStage[A, B](makeStage: () => ParsingStage[A, B]): Flow[Result[A], Result[B], akka.NotUsed] = {
 		Flow[Result[A]].transform(makeStage)
 	}
 
@@ -30,7 +30,7 @@ object FlowHelpers {
 		def onPull(ctx: Context[Result[B]]) = ctx.pull()
 	}
 
-	def fromTransformingStage[A, B](makeStage: () => TransformingStage[A, B]): Flow[Result[A], Result[B], Unit] = {
+	def fromTransformingStage[A, B](makeStage: () => TransformingStage[A, B]): Flow[Result[A], Result[B], akka.NotUsed] = {
 		Flow[Result[A]].transform(makeStage)
 	}
 

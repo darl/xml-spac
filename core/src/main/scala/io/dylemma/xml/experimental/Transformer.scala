@@ -13,13 +13,13 @@ import scala.collection.generic.CanBuildFrom
 	*/
 trait Transformer[A] { self =>
 
-	def asFlow: Flow[XMLEvent, Result[A], Unit]
+	def asFlow: Flow[XMLEvent, Result[A], akka.NotUsed]
 
-	def parseWith[B](parserFlow: Flow[Result[A], Result[B], Unit]): Parser[Any, B] = Parser.fromFlow {
+	def parseWith[B](parserFlow: Flow[Result[A], Result[B], akka.NotUsed]): Parser[Any, B] = Parser.fromFlow {
 		Flow[XmlStackState[Any]].map(_.currentEvent).via(self.asFlow).via(parserFlow)
 	}
 
-	def transformWith[B](transformerFlow: Flow[Result[A], Result[B], Unit]): Transformer[B] = {
+	def transformWith[B](transformerFlow: Flow[Result[A], Result[B], akka.NotUsed]): Transformer[B] = {
 		new Transformer[B] {
 			def asFlow = self.asFlow via transformerFlow
 		}
@@ -38,7 +38,7 @@ trait Transformer[A] { self =>
 }
 
 object Transformer {
-	def fromFlow[A](flow: Flow[XMLEvent, Result[A], Unit]): Transformer[A] = {
+	def fromFlow[A](flow: Flow[XMLEvent, Result[A], akka.NotUsed]): Transformer[A] = {
 		new Transformer[A]{ def asFlow = flow }
 	}
 

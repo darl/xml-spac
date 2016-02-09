@@ -56,5 +56,5 @@ object Playground extends App {
 		case util.Success(list) => println(list)
 		case util.Failure(err) => err.printStackTrace()
 	}
-	system.shutdown()
+	system.terminate()
 }

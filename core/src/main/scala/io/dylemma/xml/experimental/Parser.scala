@@ -3,15 +3,15 @@ package io.dylemma.xml.experimental
 import javax.xml.namespace.QName
 import javax.xml.stream.events.XMLEvent
 
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.{GraphDSL, Flow}
 import akka.stream.stage.{SyncDirective, Context, PushPullStage}
 import io.dylemma.xml.Result
 import io.dylemma.xml.Result.{Success, Error, Empty}
 
 trait Parser[-Context, +T] { self =>
-	def asFlow: Flow[XmlStackState[Context], Result[T], Unit]
+	def asFlow: Flow[XmlStackState[Context], Result[T], akka.NotUsed]
 
-	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], Unit] = {
+	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], akka.NotUsed] = {
 		XmlStackState.scanner(_ => Success(ev(()))) via asFlow
 	}
 
@@ -79,7 +79,7 @@ object Parser {
 		override def onUpstreamFinish(ctx: Context[Result[T]]) = ctx.absorbTermination()
 	}
 
-	def fromFlow[C, T](flow: Flow[XmlStackState[C], Result[T], Unit]): Parser[C, T] = {
+	def fromFlow[C, T](flow: Flow[XmlStackState[C], Result[T], akka.NotUsed]): Parser[C, T] = {
 		new Parser[C, T]{ def asFlow = flow }
 	}
 

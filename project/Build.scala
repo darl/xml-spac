@@ -8,17 +8,17 @@ object XmlStreamBuild extends Build {
 
 	lazy val commonSettings = Seq(
 		version := "0.1",
-		crossScalaVersions := Seq("2.10.5", "2.11.6"),
+		scalaVersion := "2.11.7",
 		scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature"),
 		organization := "io.dylemma"
 	)
 
-	lazy val core = (project in file("core")) //Project("xml-stream", file("core"))
+	lazy val core = (project in file("core"))
 		.settings(name := "xml-stream")
 		.settings(commonSettings: _*)
 		.settings(libraryDependencies += "com.typesafe.play" %% "play-iteratees" % "2.4.3")
 		.settings(libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test")
-		.settings(libraryDependencies += "com.typesafe.akka" %% "akka-stream-experimental" % "2.0.2")
+		.settings(libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.4.2-RC1")
 		.settings(Boilerplate.settings: _*)
 		.settings(apiDocSettings: _*)
 		.settings(publishingSettings: _*)
