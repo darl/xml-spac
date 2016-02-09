@@ -44,12 +44,7 @@ object Playground extends App {
 
 	val transformerFlow = splitter.asList(complexParser).asRawFlow
 
-	val result = xmlSrc.via(transformerFlow).runForeach { r =>
-		r match {
-			case Error(err) => err.printStackTrace()
-			case x => println(x)
-		}
-	}
+	val result = xmlSrc.via(transformerFlow).runForeach { println }
 
 	Await.ready(result, 5.seconds)
 	result.value.get match {

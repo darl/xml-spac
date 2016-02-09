@@ -3,10 +3,13 @@ package io.dylemma.xml.experimental
 import javax.xml.namespace.QName
 import javax.xml.stream.events.XMLEvent
 
+import akka.stream.{Attributes, Outlet, Inlet, FlowShape}
 import akka.stream.scaladsl.{GraphDSL, Flow}
-import akka.stream.stage.{SyncDirective, Context, PushPullStage}
+import akka.stream.stage._
 import io.dylemma.xml.Result
 import io.dylemma.xml.Result.{Success, Error, Empty}
+
+import scala.collection.generic.CanBuildFrom
 
 trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], akka.NotUsed]
@@ -69,30 +72,81 @@ trait Parser[-Context, +T] { self =>
 
 object Parser {
 
-	trait XmlHandlingStage[C, T] extends PushPullStage[XmlStackState[C], Result[T]]
-
-	trait PushEmptyOnFinish[C, T] extends XmlHandlingStage[C, T]{
-		def onPull(ctx: Context[Result[T]]) = {
-			if(ctx.isFinishing) ctx.pushAndFinish(Empty)
-			else ctx.pull()
-		}
-		override def onUpstreamFinish(ctx: Context[Result[T]]) = ctx.absorbTermination()
-	}
-
 	def fromFlow[C, T](flow: Flow[XmlStackState[C], Result[T], akka.NotUsed]): Parser[C, T] = {
 		new Parser[C, T]{ def asFlow = flow }
 	}
 
-	/** Convenience function to create Parsers based on a PushPullStage factory function.
-	  *
-	  * @param makeStage a function that returns a new PushPullStage instance
-	  * @tparam C The parser's context type
-	  * @tparam T The parser's output type
-	  * @return A new parser that will use the stage returned by `makeStage`
-	  */
-	def fromHandlingStage[C, T](makeStage: () => XmlHandlingStage[C, T]): Parser[C, T] = {
-		new Parser[C, T] {
-			def asFlow = Flow[XmlStackState[C]].transform(makeStage)
+	trait ParserGraphStage[Context, A] extends GraphStage[FlowShape[XmlStackState[Context], Result[A]]] {
+		val in: Inlet[XmlStackState[Context]] = Inlet("ParserIn")
+		val out: Outlet[Result[A]] = Outlet("ParserOut")
+		override val shape = FlowShape(in, out)
+	}
+	def fromGraphStage[Context, A](stage: ParserGraphStage[Context, A]): Parser[Context, A] = {
+		fromFlow(Flow.fromGraph(stage))
+	}
+
+	// TODO: this functionality might be better of in FlowHelpers
+	/** GraphStage that will pass each input through the `extract` function, pushing
+		* the first `Some` value and ending immediately
+		* @param extract
+		* @tparam Context
+		* @tparam Out
+		*/
+	class TakeFirstParsingStage[Context, Out](extract: XmlStackState[Context] => Option[Result[Out]])
+		extends ParserGraphStage[Context, Out] {
+
+		def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
+
+			setHandler(in, new InHandler {
+				def onPush() = {
+					val e = grab(in)
+					val value = extract(e)
+					if(value.isDefined){
+						push(out, value.get)
+						completeStage()
+					} else {
+						pull(in)
+					}
+				}
+				override def onUpstreamFinish() = {
+					push(out, Empty)
+					completeStage()
+				}
+			})
+
+			setHandler(out, new OutHandler {
+				def onPull() = pull(in)
+			})
+
+		}
+	}
+
+	// TODO: this functionality might be better of in FlowHelpers
+	class BuilderStage[Context, Out, Chunk]
+		(extractChunk: XmlStackState[Context] => Option[Seq[Chunk]])
+		(implicit cbf: CanBuildFrom[Nothing, Chunk, Out])
+	extends ParserGraphStage[Context, Out] {
+		def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
+			val builder = cbf()
+
+			setHandler(in, new InHandler {
+				def onPush() = {
+					val e = grab(in)
+					val chunkOpt = extractChunk(e)
+					if(chunkOpt.isDefined) builder ++= chunkOpt.get
+					pull(in)
+				}
+				override def onUpstreamFinish() = {
+					val result = Result(builder.result())
+					push(out, result)
+					completeStage()
+				}
+			})
+
+			setHandler(out, new OutHandler {
+				def onPull() = pull(in)
+			})
+
 		}
 	}
 
@@ -101,80 +155,52 @@ object Parser {
 	  * @tparam C The parser's context type, as well as its output type
 	  * @return A parser that yields its context
 	  */
-	def forContext[C] = fromHandlingStage{ () =>
-		new XmlHandlingStage[C, C] with PushEmptyOnFinish[C, C]{
-			def onPush(elem: XmlStackState[C], ctx: Context[Result[C]]) = ctx.pushAndFinish(elem.matchedContext)
-		}
+	def forContext[C] = fromGraphStage{
+		new TakeFirstParsingStage[C, C]({ stackState => Some(stackState.matchedContext) })
 	}
 
 	def forAttribute(name: String): Parser[Any, String] = forAttribute(new QName(name))
-	def forAttribute(name: QName): Parser[Any, String] = fromHandlingStage{ () =>
-		new XmlHandlingStage[Any, String] {
-			def onPush(s: XmlStackState[Any], ctx: Context[Result[String]]) = {
-				// the first start element *must* have the specified attribute
-				if(s.currentEvent.isStartElement){
-					val elem = s.currentEvent.asStartElement
-					val attr = elem.getAttributeByName(name)
-					if(attr == null){
-						val msg = s"$elem missing mandatory '$name' attribute"
-						ctx.pushAndFinish(Error(new IllegalArgumentException(msg)))
-					} else {
-						ctx.pushAndFinish(Result(attr.getValue))
-					}
+	def forAttribute(name: QName): Parser[Any, String] = fromGraphStage{
+		new TakeFirstParsingStage[Any, String]({ stackState =>
+			val e = stackState.currentEvent
+			if(e.isStartElement){
+				val elem = e.asStartElement
+				val attr = elem.getAttributeByName(name)
+				if(attr == null){
+					val msg = s"$elem missing mandatory '$name' attribute"
+					Some(Result.Error(new IllegalArgumentException(msg)))
 				} else {
-					ctx.pull()
+					Some(Result(attr.getValue))
 				}
+			} else {
+				None
 			}
-			def onPull(ctx: Context[Result[String]]) = {
-				if(ctx.isFinishing) ctx.pushAndFinish(Empty)
-				else ctx.pull()
-			}
-			override def onUpstreamFinish(ctx: Context[Result[String]]) = ctx.absorbTermination()
-		}
+		})
 	}
 
 	def forOptionalAttribute(name: String): Parser[Any, Option[String]] = forOptionalAttribute(new QName(name))
-	def forOptionalAttribute(name: QName): Parser[Any, Option[String]] = fromHandlingStage{ () =>
-		new XmlHandlingStage[Any, Option[String]] {
-			def onPush(s: XmlStackState[Any], ctx: Context[Result[Option[String]]]) = {
-				if(s.currentEvent.isStartElement){
-					val attr = s.currentEvent.asStartElement.getAttributeByName(name)
-					if(attr == null){
-						ctx.pushAndFinish(Success(None))
-					} else {
-						ctx.pushAndFinish(Result(Some(attr.getValue)))
-					}
-				} else {
-					ctx.pull()
-				}
+	def forOptionalAttribute(name: QName): Parser[Any, Option[String]] = fromGraphStage{
+		new TakeFirstParsingStage[Any, Option[String]]({ stackState =>
+			val e = stackState.currentEvent
+			if(e.isStartElement){
+				val elem = e.asStartElement
+				val attr = elem.getAttributeByName(name)
+				if(attr == null) Some(Success.none)
+				else Some(Result(Some(attr.getValue)))
+			} else {
+				None
 			}
-
-			def onPull(ctx: Context[Result[Option[String]]]): SyncDirective = {
-				if(ctx.isFinishing) ctx.pushAndFinish(Empty)
-				else ctx.pull()
-			}
-
-			override def onUpstreamFinish(ctx: Context[Result[Option[String]]]) = ctx.absorbTermination()
-		}
+		})
 	}
 
 	/** A parser that will collect the text from all `Characters` events,
 	  * emitting the concatenation of those strings when the stream ends.
 	  */
-	val forText: Parser[Any, String] = fromHandlingStage{ () =>
-		new XmlHandlingStage[Any, String] {
-			var sb = new StringBuilder
-			def onPush(s: XmlStackState[Any], ctx: Context[Result[String]]) = {
-				if(s.currentEvent.isCharacters){
-					sb append s.currentEvent.asCharacters.getData
-				}
-				ctx.pull()
-			}
-			override def onUpstreamFinish(ctx: Context[Result[String]]) = ctx.absorbTermination()
-			def onPull(ctx: Context[Result[String]]) = {
-				if(ctx.isFinishing) ctx.pushAndFinish(Result(sb.result))
-				else ctx.pull()
-			}
-		}
+	val forText: Parser[Any, String] = fromGraphStage{
+		new BuilderStage[Any, String, Char]({ stackState =>
+			val e = stackState.currentEvent
+			if(e.isCharacters) Some(e.asCharacters.getData)
+			else None
+		})
 	}
 }
