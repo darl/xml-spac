@@ -13,18 +13,10 @@ import scala.collection.generic.CanBuildFrom
 	*/
 object FlowHelpers {
 
-	trait ConsumerGraphStage[A, B] extends GraphStage[FlowShape[Result[A], Result[B]]] {
-		val in: Inlet[Result[A]] = Inlet("ConsumerIn")
-		val out: Outlet[Result[B]] = Outlet("ConsumerOut")
+	trait ResultTransformingGraphStage[A, B] extends GraphStage[FlowShape[Result[A], Result[B]]] {
+		val in: Inlet[Result[A]] = Inlet("ResultTransformerIn")
+		val out: Outlet[Result[B]] = Outlet("ResultTransformerOut")
 		override val shape = FlowShape(in, out)
-	}
-
-	trait TransformingStage[A, B] extends PushPullStage[Result[A], Result[B]] {
-		def onPull(ctx: Context[Result[B]]) = ctx.pull()
-	}
-
-	def fromTransformingStage[A, B](makeStage: () => TransformingStage[A, B]): Flow[Result[A], Result[B], akka.NotUsed] = {
-		Flow[Result[A]].transform(makeStage)
 	}
 
 	trait ConsumerHandler[A, B] {
@@ -33,7 +25,7 @@ object FlowHelpers {
 	}
 
 	def fromConsumerHandler[A, B](makeHandler: () => ConsumerHandler[A, B]) = Flow.fromGraph{
-		new ConsumerGraphStage[A, B] {
+		new ResultTransformingGraphStage[A, B] {
 			def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
 				val handler = makeHandler()
 				setHandler(in, new InHandler {
@@ -112,33 +104,51 @@ object FlowHelpers {
 		}
 	}
 
-	def takeUntilNthError[A](n: Int) = fromTransformingStage{() =>
-		new TransformingStage[A, A] {
-			private var errorCount = 0
-			def onPush(elem: Result[A], ctx: Context[Result[A]]) = {
-				if(elem.isError){
-					errorCount += 1
-					if(errorCount >= n) ctx.finish()
-					else ctx.push(elem)
-				} else {
-					ctx.push(elem)
-				}
-			}
-		}
-	}
+	def takeUntilNthError[A](n: Int) = Flow.fromGraph(new ResultTransformingGraphStage[A, A] {
+		def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
 
-	def takeThroughNthError[A](n: Int) = fromTransformingStage{() =>
-		new TransformingStage[A, A] {
-			private var errorCount = 0
-			def onPush(elem: Result[A], ctx: Context[Result[A]]) = {
-				if(elem.isError){
-					errorCount += 1
-					if(errorCount >= n) ctx.pushAndFinish(elem)
-					else ctx.push(elem)
-				} else {
-					ctx.push(elem)
+			var errorCount = 0
+
+			setHandler(in, new InHandler {
+				def onPush() = {
+					val e = grab(in)
+					if(e.isError){
+						errorCount += 1
+						if(errorCount >= n) completeStage()
+						else push(out, e)
+					} else {
+						push(out, e)
+					}
 				}
-			}
+			})
+
+			setHandler(out, new OutHandler {
+				def onPull() = pull(in)
+			})
 		}
-	}
+	})
+
+	def takeThroughNthError[A](n: Int) = Flow.fromGraph(new ResultTransformingGraphStage[A, A] {
+		def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
+
+			var errorCount = 0
+
+			setHandler(in, new InHandler {
+				def onPush() = {
+					val e = grab(in)
+					if(e.isError){
+						errorCount += 1
+						push(out, e)
+						if(errorCount >= n) completeStage()
+					} else {
+						push(out, e)
+					}
+				}
+			})
+
+			setHandler(out, new OutHandler {
+				def onPull() = pull(in)
+			})
+		}
+	})
 }

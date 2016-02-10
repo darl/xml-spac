@@ -36,18 +36,18 @@ object Playground extends App {
 
 	val complexParser = (
 		inContext[String] ~
-		(* %? "bloop") ~
+		(* % "bloop") ~
 		(* % Text)
 	) join { (context, attr, text) =>
 		s"cs: context=$context attr=$attr, text=$text}"
 	}
 
-	val transformerFlow = splitter.asList(complexParser).asRawFlow
+	val transformerFlow = splitter.through(complexParser).asFlow
 
 	val result = xmlSrc.via(transformerFlow).runForeach { println }
 
 	Await.ready(result, 5.seconds)
-	result.value.get match {
+	result.value foreach {
 		case util.Success(list) => println(list)
 		case util.Failure(err) => err.printStackTrace()
 	}
