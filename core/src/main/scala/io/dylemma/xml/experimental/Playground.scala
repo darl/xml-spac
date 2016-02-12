@@ -50,9 +50,9 @@ object Playground extends App {
 		var parserB = (* % Text) map ThingB
 		var parserC = (* % Text) map ThingC
 		val demuxABC: Parser[String, Thing] = Parser.demultiplexed[String](
-			parserA.withName("parserA") -> { _ == "a"},
-			parserB.withName("parserB") -> { _ == "b" },
-			parserC.withName("parserC") -> { _ == "c" }
+			parserA -> { _ == "a"},
+			parserB -> { _ == "b" },
+			parserC -> { _ == "c" }
 		)
 		val demuxSplitter = "foo" / ("a" | "b" | "c").extractName
 
