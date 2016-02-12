@@ -28,9 +28,11 @@ object FlowHelpers {
 		new ResultTransformingGraphStage[A, B] {
 			def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape){
 				val handler = makeHandler()
+				var gotInput = false
 				setHandler(in, new InHandler {
 					def onPush() = {
 						val a = grab(in)
+						gotInput = true
 						val bOpt = handler.onInput(a)
 						if(bOpt.isDefined){
 							push(out, bOpt.get)
@@ -40,7 +42,7 @@ object FlowHelpers {
 						}
 					}
 					override def onUpstreamFinish() = {
-						push(out, handler.onEnd())
+						if(gotInput) push(out, handler.onEnd())
 						completeStage()
 					}
 				})

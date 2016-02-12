@@ -30,26 +30,57 @@ object Playground extends App {
 		|    </cs>
 		|</stuff>""".stripMargin
 
-	val xmlSrc = XmlEventPublisher(rawXml)
+	val demuxXml =
+		"""<foo>
+			|  <a>This is text in an A</a>
+			|  <b>This is text in a B!</b>
+			|  <a>Another &lt;A/&gt;</a>
+			|  <c>This is a C...</c>
+			|</foo>
+		""".stripMargin
 
-	val splitter = "stuff" / "cs" mapContext { _ => "yay" }
+	sealed trait Thing
+	case class ThingA(s: String) extends Thing
+	case class ThingB(s: String) extends Thing
+	case class ThingC(s: String) extends Thing
 
-	val complexParser = (
-		inContext[String] ~
-		(* % "bloop") ~
-		(* % Text)
-	) join { (context, attr, text) =>
-		s"cs: context=$context attr=$attr, text=$text}"
+	try {
+
+		val parserA = (* % Text) map ThingA
+		var parserB = (* % Text) map ThingB
+		var parserC = (* % Text) map ThingC
+		val demuxABC: Parser[String, Thing] = Parser.demultiplexed[String](
+			parserA.withName("parserA") -> { _ == "a"},
+			parserB.withName("parserB") -> { _ == "b" },
+			parserC.withName("parserC") -> { _ == "c" }
+		)
+		val demuxSplitter = "foo" / ("a" | "b" | "c").extractName
+
+		val demuxResult = XmlEventPublisher(demuxXml).via(demuxSplitter.through(demuxABC).asFlow).runForeach(println)
+		Await.ready(demuxResult, 5.seconds)
+
+//		val xmlSrc = XmlEventPublisher(rawXml)
+//
+//		val splitter = "stuff" / "cs" mapContext { _ => "yay" }
+//
+//		val complexParser = (
+//			inContext[String] ~
+//				(* % "bloop") ~
+//				(* % Text)
+//			) join { (context, attr, text) =>
+//			s"cs: context=$context attr=$attr, text=$text}"
+//		}
+//
+//		val transformerFlow = splitter.through(complexParser).asFlow
+//
+//		val result = xmlSrc.via(transformerFlow).runForeach {println}
+//
+//		Await.ready(result, 5.seconds)
+//		result.value foreach {
+//			case util.Success(list) => println(list)
+//			case util.Failure(err) => err.printStackTrace()
+//		}
+	} finally {
+		system.terminate()
 	}
-
-	val transformerFlow = splitter.through(complexParser).asFlow
-
-	val result = xmlSrc.via(transformerFlow).runForeach { println }
-
-	Await.ready(result, 5.seconds)
-	result.value foreach {
-		case util.Success(list) => println(list)
-		case util.Failure(err) => err.printStackTrace()
-	}
-	system.terminate()
 }
