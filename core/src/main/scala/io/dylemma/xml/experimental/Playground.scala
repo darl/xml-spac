@@ -56,7 +56,15 @@ object Playground extends App {
 		)
 		val demuxSplitter = "foo" / ("a" | "b" | "c").extractName
 
-		val demuxResult = XmlEventPublisher(demuxXml).via(demuxSplitter.through(demuxABC).asFlow).runForeach(println)
+		import Parser.demuxSyntax._
+		val demuxABC2: Parser[String, Thing] = for {
+			context <- Demux[String]
+			a <- parserA if context === "a"
+			b <- parserB if context === "b"
+			c <- parserC if context === "c"
+		} yield a | b | c
+
+		val demuxResult = XmlEventPublisher(demuxXml).via(demuxSplitter.through(demuxABC2).asFlow).runForeach(println)
 		Await.ready(demuxResult, 5.seconds)
 
 //		val xmlSrc = XmlEventPublisher(rawXml)

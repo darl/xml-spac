@@ -229,4 +229,105 @@ object Parser {
 			fromFlow(Flow.fromGraph(demuxShape))
 		}
 	}
+
+	/** Opt-in DSL for constructing Demultiplexed Parsers.
+		*
+		* Example:
+		* {{{
+		*   Parser.demultiplexed[String](
+		*     parserA -> { _ == "a" },
+		*     parserB -> { _ == "b" },
+		*     parserC -> { _ == "c" }
+		*   )
+		* }}}
+		* will be equivalent to
+		* {{{
+		*   import demuxSyntax._
+		*   for {
+		*     context <- Demux[String]
+		*     a <- parserA if context === "a"
+		*     b <- parserB if context === "b"
+		*     c <- parserC if context === "c"
+		*   } yield a | b | c
+		* }}}
+		*/
+	object demuxSyntax {
+
+		/** DSL starting point.
+			* When using the demuxSyntax DSL, always start by using
+			* {{{
+			*   for {
+			*     context <- Demux[MyContextType]
+			*     ...
+			*   } yield ...
+			* }}}
+			*/
+		object Demux {
+			def apply[Context] = new Demux[Context]
+		}
+		class Demux[Context] {
+			def flatMap[Out](f: DemuxContext[Context] => AsPossibleOutputs[Context, Out]) = {
+				val outputs = f(new DemuxContext[Context]).asPossibleOutputs.map { po =>
+					po.from -> po.cond.p
+				}
+				demultiplexed[Context](outputs: _*)
+			}
+		}
+
+		/** DSL starting point for creating DemuxConditions. */
+		class DemuxContext[C] {
+			/** Creates a new DemuxCondition that compares the context to the given `value`.
+				* @param value The value to compare against the context
+				* @return A new DemuxCondition that compares the context to the given `value`
+				*/
+			def ===(value: C) = DemuxCondition[C](_ == value)
+
+			/** Used to create arbitrary `DemuxCondition`s in case `===` is
+				* insufficient to express the appropriate conditional.
+				* @param p A function that checks if the context meets the condition
+				* @return A new DemuxCondition wrapping `p`
+				*/
+			def check(p: C => Boolean) = DemuxCondition(p)
+		}
+
+		/** Wrapper for a `C => Boolean` function that will be called on context
+			* values by a generated DemultiplexedParser.
+			* @param p The context match function
+			* @tparam C The context type
+			*/
+		case class DemuxCondition[-C](p: C => Boolean)
+
+		// collection wrapper that accumulates outputs for the DSL
+		sealed trait AsPossibleOutputs[-Context, +A] {
+			def asPossibleOutputs: Seq[PossibleOutput[Context, A]]
+			def |[C <: Context, B >: A](next: PossibleOutput[C, B]) = PossibleOutputs(asPossibleOutputs :+ next)
+		}
+		case class PossibleOutput[-Context, +Out](
+			from: Parser[Context, Out],
+			cond: DemuxCondition[Context]
+		) extends AsPossibleOutputs[Context, Out] {
+			def asPossibleOutputs = Seq(this)
+		}
+		case class PossibleOutputs[-Context, +Out](
+			asPossibleOutputs: Seq[PossibleOutput[Context, Out]]
+		) extends AsPossibleOutputs[Context, Out]
+
+		// wrapper to handle `... <- someParser if context === someValue`
+		case class ParserWithCondition[Context, +A](
+			parser: Parser[Context, A],
+			condition: DemuxCondition[Context]
+		){
+			def flatMap[B >: A](f: PossibleOutput[Context, A] => AsPossibleOutputs[Context, B]) = {
+				f(PossibleOutput(parser, condition))
+			}
+			def map[B >: A](f: PossibleOutput[Context, A] => AsPossibleOutputs[Context, B]) = {
+				f(PossibleOutput(parser, condition))
+			}
+		}
+
+		// implicit upgrade to add `withFilter` to Parsers, allowing them to participate in the DSL
+		implicit class RichParser[In, Out](parser: Parser[In, Out]) {
+			def withFilter[Context <: In](f: Any => DemuxCondition[Context]) = ParserWithCondition(parser, f(null))
+		}
+	}
 }
