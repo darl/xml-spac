@@ -1,16 +1,32 @@
 package io.dylemma.xml.experimental
 
 import javax.xml.namespace.QName
+import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.events.XMLEvent
 
-import io.dylemma.xml.Result
+import io.dylemma.xml.{AsInputStream, Result, XMLEventSource}
 import io.dylemma.xml.Result.{Empty, Success}
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
 
+import scala.concurrent.Future
+
 trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], akka.NotUsed]
+
+	def parse[In](
+		input: In,
+		inputFactory: XMLInputFactory = XMLEventSource.defaultInputFactory
+	)(
+		implicit asInput: AsInputStream[In],
+		anyContext: Any <:< Context,
+		materializer: Materializer
+	): Future[Result[T]] = {
+		val pub = XmlEventPublisher(input, inputFactory)
+		val rawFlow = asRawFlow(anyContext)
+		pub.via(rawFlow).runWith(Sink.head)
+	}
 
 	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], akka.NotUsed] = {
 		XmlStackState.scanner(_ => Success(ev(()))) via asFlow
@@ -86,6 +102,7 @@ object Parser {
 	// TODO: this functionality might be better of in FlowHelpers
 	/** GraphStage that will pass each input through the `extract` function, pushing
 		* the first `Some` value and ending immediately
+		*
 		* @param extract
 		* @tparam Context
 		* @tparam Out
@@ -121,7 +138,8 @@ object Parser {
 
 	/** Creates a new parser which will immediately return the `matchedContext` from
 	  * the first event passed to it, then end.
-	  * @tparam C The parser's context type, as well as its output type
+		*
+		* @tparam C The parser's context type, as well as its output type
 	  * @return A parser that yields its context
 	  */
 	def forContext[C] = fromGraphStage{
@@ -277,6 +295,7 @@ object Parser {
 		/** DSL starting point for creating DemuxConditions. */
 		class DemuxContext[C] {
 			/** Creates a new DemuxCondition that compares the context to the given `value`.
+				*
 				* @param value The value to compare against the context
 				* @return A new DemuxCondition that compares the context to the given `value`
 				*/
@@ -284,6 +303,7 @@ object Parser {
 
 			/** Used to create arbitrary `DemuxCondition`s in case `===` is
 				* insufficient to express the appropriate conditional.
+				*
 				* @param p A function that checks if the context meets the condition
 				* @return A new DemuxCondition wrapping `p`
 				*/
@@ -292,6 +312,7 @@ object Parser {
 
 		/** Wrapper for a `C => Boolean` function that will be called on context
 			* values by a generated DemultiplexedParser.
+			*
 			* @param p The context match function
 			* @tparam C The context type
 			*/

@@ -67,6 +67,10 @@ object Playground extends App {
 		val demuxResult = XmlEventPublisher(demuxXml).via(demuxSplitter.through(demuxABC2).asFlow).runForeach(println)
 		Await.ready(demuxResult, 5.seconds)
 
+		val fullParser = demuxSplitter.through(demuxABC).parseToList
+		val result = Await.result(fullParser.parse(demuxXml), 5.seconds)
+		println(s"Final Result: $result")
+
 //		val xmlSrc = XmlEventPublisher(rawXml)
 //
 //		val splitter = "stuff" / "cs" mapContext { _ => "yay" }
