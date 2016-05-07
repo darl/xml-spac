@@ -3,6 +3,7 @@ package io.dylemma.xml.experimental
 import akka.stream.FlowShape
 import akka.stream.scaladsl.{ZipWith, Broadcast, GraphDSL, Flow}
 import io.dylemma.xml.Result
+import io.dylemma.xml.{ Chain => ~ }
 
 object ParserCombination extends ParserCombination
 trait ParserCombination {
@@ -49,6 +50,25 @@ trait ParserCombination {
 				],
 				p.unsafeCastContext[Context]
 			)
+		}
+	}#
+
+	]
+
+	[2..22#/** Provides the `tupledContext` and `joinContext` methods to any Splitter
+	  * whose result type is a chain of 1 elements.
+	  */
+	implicit class Chain1SplitterOps[[#A1#]](splitter: Splitter[[#A1# ~ ]]) {
+		/** Maps the context from a chain to a corresponding tuple */
+		def tupledContext: Splitter[([#A1#])] = splitter mapContext {
+			case [#a1# ~ ] => ([#a1#])
+		}
+
+		/** Maps the context by passing the elements of its chain into
+		  * the provided function `f`
+		  */
+		def joinContext[M](f: ([#A1#]) => M): Splitter[M] = splitter mapContext {
+			case [#a1# ~ ] => f([#a1#])
 		}
 	}#
 

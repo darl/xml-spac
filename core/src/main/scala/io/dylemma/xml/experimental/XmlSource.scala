@@ -100,7 +100,6 @@ private class XmlEventActorPublisher[In]
 	override def postStop() = {
 		super.postStop()
 
-		println("stopping XmlSourcePublisher Actor")
 		try {
 			if(inputResource != null) adapter.closeResource(inputResource)
 		} catch {

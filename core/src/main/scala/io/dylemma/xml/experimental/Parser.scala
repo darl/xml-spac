@@ -24,14 +24,14 @@ trait Parser[-Context, +T] { self =>
 		anyContext: Any <:< Context,
 		materializer: Materializer
 	): Future[Result[T]] = {
-		val pub = XmlEventPublisher(input, inputFactory)
-		val rawFlow = asRawFlow(anyContext)
-		val headResultSink = Sink.fromGraph(new FirstResultStage[T])
-		pub.via(rawFlow).runWith(headResultSink)
+		XmlEventPublisher(input, inputFactory) runWith asSink
 	}
 
-	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], akka.NotUsed] = {
-		XmlStackState.scanner(_ => Success(ev(()))) via asFlow
+	def asSink(implicit ev: Any <:< Context): Sink[XMLEvent, Future[Result[T]]] = {
+		val ctx: Context = ev(akka.NotUsed)
+		val stackStateAdapter = Flow[XMLEvent].map(XmlStackState(_, Nil, Empty, 0))
+		val consumer = Sink.fromGraph(new FirstResultStage[T])
+		stackStateAdapter.via(asFlow).toMat(consumer)(Keep.right)
 	}
 
 	/** INTERNAL API.

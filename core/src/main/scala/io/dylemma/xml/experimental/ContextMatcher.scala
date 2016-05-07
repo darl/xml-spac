@@ -13,10 +13,6 @@ import io.dylemma.xml.{ContextCombiner, Result}
   */
 trait ContextMatcher[+A] extends Splitter[A] with (List[StartElement] => Result[A]) { self =>
 
-	def mapContext[B](f: A => B): ContextMatcher[B] = new ContextMatcher[B] {
-		def apply(stack: List[StartElement]) = self(stack).map(f)
-	}
-
 	def rmapContext[B](f: Result[A] => Result[B]): ContextMatcher[B] = new ContextMatcher[B] {
 		def apply(stack: List[StartElement]) = f(self(stack))
 	}

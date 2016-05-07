@@ -65,6 +65,8 @@ object Transformer {
 trait Splitter[+Context] {
 
 	def through[Out](parser: Parser[Context, Out]): Transformer[Out]
+	def rmapContext[B](f: Result[Context] => Result[B]): ContextMatcher[B]
+	def mapContext[B](f: Context => B): ContextMatcher[B] = rmapContext(_ map f)
 
 	// methods for feeding results through an 'inner' parser to obtain results
 	@inline def as[Out](implicit parser: Parser[Context, Out]) = through(parser).parseFirst

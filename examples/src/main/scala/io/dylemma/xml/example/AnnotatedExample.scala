@@ -1,145 +1,164 @@
 package io.dylemma.xml.example
 
 import javax.xml.stream.events.XMLEvent
-import scala.concurrent.Future
 
-import io.dylemma.xml.ParsingDSL._
-import io.dylemma.xml._
-import play.api.libs.iteratee.{ Enumerator, Iteratee }
+import akka.actor.{ActorRef, ActorSystem}
+import akka.stream.ActorMaterializer
+import akka.stream.scaladsl.{Flow, Source}
+import io.dylemma.xml.Result
+import io.dylemma.xml.experimental.ParsingDSL._
+import io.dylemma.xml.experimental.{XmlEventPublisher, _}
 
-/*
- * The `trampoline` execution context runs everything on the current thread,
- * so all of our parser/future/iteratee operations in this file will block.
- */
-import play.api.libs.iteratee.Execution.Implicits.trampoline
+import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 object AnnotatedExample extends App {
 
-	val rawXml = s"""<blog title="Cool Beans">
-		| <post id="1">
-		|  <comment user="bob">Hello there</comment>
-		|  <comment user="alice">Oh, hi</comment>
-		| </post>
-		| <post id="2">
-		|  <comment user="carla">Test comment!</comment>
-		|  <comment user="dylan">I'm testing too!</comment>
-		| </post>
-		|</blog>""".stripMargin
+	// create an ActorSystem and ActorMaterializer for interacting with akka-streams
+	implicit val actorSystem = ActorSystem("example-system")
+	implicit val actorMaterializer = ActorMaterializer()
 
-	/** This creates an Enumerator (stream) of XMLEvents from the `rawXml` String.
-		* The `XMLEventEnumerator` constructor uses the `AsInputStream` typeclass to
-		* accept arguments of various types, including Strings, Files, and InputStreams.
-		*/
-	val xmlStream: Enumerator[XMLEvent] = XMLEventEnumerator(rawXml)
+	// we need to shut down the actorSystem at the end, even if an exception is thrown,
+	// or else the program will hang when the main thread ends
+	try {
+		val rawXml = s"""<blog title="Cool Beans">
+			| <post id="1">
+			|  <comment user="bob">Hello there</comment>
+			|  <comment user="alice">Oh, hi</comment>
+			| </post>
+			| <post id="2">
+			|  <comment user="carla">Test comment!</comment>
+			|  <comment user="dylan">I'm testing too!</comment>
+			| </post>
+			|</blog>""".stripMargin
 
-	/** This class represents the 'context' that our parser *must* be in,
-		* in order to generate results. We'll be taking the `blogTitle` from
-		* the "blog" element's "title" attribute, and the `postId` from the
-		* "post" element's "id" attribute.
-		*/
-	case class PostContext(blogTitle: String, postId: Int)
+		/** This creates an akka-streams Source of XMLEvents from the `rawXml` String.
+			* The `XmlEventPublisher` constructor uses the `AsInputStream` typeclass to
+			* accept arguments of various types, including Strings, Files, and InputStreams.
+			*/
+		val xmlSource: Source[XMLEvent, ActorRef] = XmlEventPublisher(rawXml)
 
-	/** A splitter divides the XMLEvent stream into substreams, where each
-		* substream has some defined context. You attach a parser to a splitter
-		* in order to transform a stream of XMLEvents to a stream of results.
-		*
-		* There's a lot of syntax sugar happening in this expression:
-		*
-		* The strings like "blog", "post", and "comment" are being implicitly
-		* transformed to `Matcher`s which filter on elements with those tags.
-		*
-		* The `attr("title")` and `attr("id")` calls return `Matcher`s which
-		* extract their respective attributes from the element they are attached to.
-		*
-		* Individual matchers are combined with `&`. They are then combined with `/`
-		* to create an overall matcher that applies to the entire tag stack.
-		*
-		* When multiple matchers which extract results are combined, their results
-		* are combined into a `Chain`. The `joinContext` call at the end combines
-		* each result from the extracted chain by passing them into a function -
-		* in this case - `PostContext.apply`.
-		*/
-	val splitter: Splitter[PostContext] = (
-		Root /
-		("blog" & attr("title")) /
-		("post" & attr("id").map(_.toInt)) /
-		"comment"
-	).joinContext(PostContext)
+		/** This class represents the 'context' that our parser *must* be in,
+			* in order to generate results. We'll be taking the `blogTitle` from
+			* the "blog" element's "title" attribute, and the `postId` from the
+			* "post" element's "id" attribute.
+			*/
+		case class PostContext(blogTitle: String, postId: Int)
 
-	/** This class is what we are parsing.
-		* The `context` argument will come from the `blog[title]` and `post[id]`
-		* attributes, which are being extracted by the `splitter`.
-		* The `user` argument will come from the `comment[user]` attribute.
-		* The `text` argument will come from the text inside the `comment` element.
-		*/
-	case class Comment(context: PostContext, user: String, text: String)
+		/** A splitter divides the XMLEvent stream into substreams, where each
+			* substream has some defined context. You attach a parser to a splitter
+			* in order to transform a stream of XMLEvents to a stream of results.
+			*
+			* There's a lot of syntax sugar happening in this expression:
+			*
+			* The strings like "blog", "post", and "comment" are being implicitly
+			* transformed to `Matcher`s which filter on elements with those tags.
+			*
+			* The `attr("title")` and `attr("id")` calls return `Matcher`s which
+			* extract their respective attributes from the element they are attached to.
+			*
+			* Individual matchers are combined with `&`. They are then combined with `/`
+			* to create an overall matcher that applies to the entire tag stack.
+			*
+			* When multiple matchers which extract results are combined, their results
+			* are combined into a `Chain`. The `joinContext` call at the end combines
+			* each result from the extracted chain by passing them into a function -
+			* in this case - `PostContext.apply`.
+			*/
+		val splitter: Splitter[PostContext] = (
+			Root /
+			("blog" & attr("title")) /
+			("post" & attr("id").mapContext(_.toInt)) /
+			"comment"
+		).joinContext(PostContext)
 
-	/** We define the parser for `Comments`.
-		* We're actually defining 3 separate parsers, combining them into a chain via `&`,
-		* then `join`-ing the chain together with the `Comment.apply` function.
-		*/
-	val commentParser: ParserForContext[PostContext, Comment] = (
-		/* This parser simply returns the context that gets passed in,
-		 * but it also adds the requirement that there *be* a conext.
+		/** This class is what we are parsing.
+			* The `context` argument will come from the `blog[title]` and `post[id]`
+			* attributes, which are being extracted by the `splitter`.
+			* The `user` argument will come from the `comment[user]` attribute.
+			* The `text` argument will come from the text inside the `comment` element.
+			*/
+		case class Comment(context: PostContext, user: String, text: String)
+
+		/** We define the parser for `Comments`.
+			* We're actually defining 3 separate parsers, combining them into a chain via `~`,
+			* then `join`-ing the chain together with the `Comment.apply` function.
+			*/
+		val commentParser: Parser[PostContext, Comment] = (
+			/* This parser simply returns the context that gets passed in,
+			 * but it also adds the requirement that there *be* a conext.
+			 */
+			inContext[PostContext] ~
+
+			/* This parser extracts the "user" attribute from the top-level element
+			 * from the xml stream. Since this will be called on substreams where
+			 * "comment" is the top-level element, it'll find the `comment[user]` attribute.
+			 */
+			(* % "user") ~
+
+			/* This parser extracts the text from the top-level element of the xml stream.
+			 * Again, this parser will be called on substreams where "comment" is the
+			 * top-level element, so it'll find the comment's content.
+			 */
+			(* % Text)
+
+		/* Before calling `join`, we have a `Parser[PostContext, Chain[Chain[PostContext, String], String]]]`.
+		 * The `join` function will take a `(PostContent, String, String) => Result`.
+		 * Here, we use `Comment.apply`
 		 */
-		inContext[PostContext] &
+		).join(Comment)
 
-		/* This parser extracts the "user" attribute from the top-level element
-		 * from the xml stream. Since this will be called on substreams where
-		 * "comment" is the top-level element, it'll find the `comment[user]` attribute.
+		/* The `commentParser` can't be used by itself because it requires a context
+		 * to be passed into it. You can use the `inContext` method to give it context,
+		 * or you can attach it to the `splitter`, which will pass the appropriate
+		 * context for each substream it finds.
+		 *
+		 * We'll attach it to the `splitter`, which gives us a `Transformer`.
 		 */
-		(* % "user") &
+		val commentTransformer = splitter.through(commentParser)
 
-		/* This parser extracts the text from the top-level element of the xml stream.
-		 * Again, this parser will be called on substreams where "comment" is the
-		 * top-level element, so it'll find the comment's content.
+		/*
+		 * Under the hood, a transformer is an Flow[XMLEvent, Result], meaning
+		 * it transforms a stream of xml events into a stream of results.
+		 * You can use the usual `Source.via(Flow).runWith(Sink)` combinations
+		 * to consume the stream.
 		 */
-		(* % Text)
+		val commentFlow: Flow[XMLEvent, Result[Comment], akka.NotUsed] = commentTransformer.asFlow
+		val transformedSource: Source[Result[Comment], ActorRef] = xmlSource.via(commentFlow)
+		val doneParsing: Future[akka.Done] = transformedSource.runForeach{ result => println(s"Stream result: $result") }
+		Await.ready(doneParsing, 5.seconds)
 
-	/* Before calling `join`, we have a `Parser[PostContext, Chain[Chain[PostContext, String], String]]]`.
-	 * The `join` function will take a `(PostContent, String, String) => Result`.
-	 * Here, we use `Comment.apply`
-	 */
-	).join(Comment)
+		/* ...BUT you don't *have* to.
+		 * The transformer has some convenience methods for collecting the elements it
+		 * emits into some further value (e.g. a collection or an option), resulting in
+		 * a parser for that value. Since the transformer already had a context attached,
+		 * the resulting parser will also already have a context attached.
+		 */
+		val firstCommentParser: Parser[Any, Comment] = commentTransformer.parseFirst
+		val commentsListParser: Parser[Any, List[Comment]] = commentTransformer.parseToList
 
-	/* The `commentParser` can't be used by itself because it requires a context
-	 * to be passed into it. You can use the `inContext` method to give it context,
-	 * or you can attach it to the `splitter`, which will pass the appropriate
-	 * context for each substream it finds.
-	 *
-	 * We'll attach it to the `splitter`, which gives us a `Transformer`.
-	 */
-	val commentTransformer = splitter.through(commentParser)
+		/*
+		As long as a Parser has been attached to a Context (i.e. its first type argument is `Any`),
+		It can be treated as a `Sink[XMLEvent, Future[Result]]`, which allows you to get a value
+		from an XML Source.
 
-	/*
-	 * Under the hood, a transformer is an Enumeratee[XMLEvent, Result], meaning
-	 * it transforms a stream of xml events into a stream of results.
-	 * You can use the usual `Enumerator &> Enumeratee |>>> Iteratee` combinations
-	 * to consume the stream.
-	 */
-	val commentEnumerator: Enumerator[Result[Comment]] = xmlStream &> commentTransformer.toEnumeratee
-	val commentIteratee = Iteratee.foreach[Result[Comment]]{ result => println(s"Iteratee result: $result") }
-	val doneParsing: Future[Unit] = commentEnumerator |>>> commentIteratee
+		Parsers created via a Transformer's `parseXYZ` method will always be attached to a context.
+		You can also call `myParser.inContext(myContext)` to explicitly attach it to a context.
+		 */
+		val allComments: Future[Result[List[Comment]]] = xmlSource.runWith(commentsListParser.asSink)
+		val allCommentsResult = Await.result(allComments, 5.seconds)
+		println(s"allComments finished: $allCommentsResult")
 
-	/* ...BUT you don't *have* to.
-	 * The transformer has some convenience methods for collecting the elements it
-	 * emits into some further value (e.g. a collection or an option), resulting in
-	 * a parser for that value. Since the transformer already had a context attached,
-	 * the resulting parser will also already have a context attached.
-	 */
-	val firstCommentParser: Parser[Comment] = commentTransformer.parseSingle
-	val commentsListParser: Parser[List[Comment]] = commentTransformer.parseList
-	val printlnCommentParser: Parser[Unit] = commentTransformer.foreach(println)
+		/* For convenience, you could just call `parse` instead, avoiding having to
+		 * manually create Sources and Sinks. The `parse` method works on the same
+		 * typeclass as the XMLEventPublisher, meaning you can pass in files and streams
+		 * instead of Strings.
+		 */
+		val allComments2: Future[Result[List[Comment]]] = commentsListParser.parse(rawXml)
+		val allComments2Result = Await.result(allComments2, 5.seconds)
+		assert(allCommentsResult == allComments2Result)
 
-	/* Under the hood, a Parser is an Iteratee[XMLEvent, Result], meaning
-	 * it consumes a stream of XMLEvents to generate some result value. You can
-	 * consume an Enumerator via the `|>>>` or `run` methods.
-	 */
-	val allComments: Future[Result[List[Comment]]] = xmlStream |>>> commentsListParser.toIteratee
-
-	/* For convenience, you could just call `parse` instead, avoiding having to
-	 * deal with all of the low-level Enumerator/Enumeratee/Iteratee details.
-	 */
-	val allComments2: Future[Result[List[Comment]]] = commentsListParser.parse(rawXml)
-	allComments2 onComplete { tryResult => println(s"allComments2 finished: $tryResult") }
+	} finally {
+		actorSystem.terminate()
+	}
 }
