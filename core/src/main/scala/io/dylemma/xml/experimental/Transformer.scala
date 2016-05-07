@@ -28,6 +28,7 @@ trait Transformer[A] { self =>
 	@inline def parseFirst = parseWith(FlowHelpers.first)
 	@inline def parseFirstOption = parseWith(FlowHelpers.firstOption)
 	@inline def parseToList = parseWith(FlowHelpers.toList)
+	@inline def parseResultsToList = parseWith(FlowHelpers.toResultList)
 	@inline def parseConcat[B, That]()(implicit t: A => TraversableOnce[B], bf: CanBuildFrom[A, B, That]) = {
 		parseWith(FlowHelpers.concat)
 	}
@@ -54,7 +55,7 @@ object Transformer {
 	}
 
 	private def groupByConsecutiveMatches[T] = Flow[XmlStackState[T]]
-		.scan(SplitterState(false, false, XmlStackState.initial[T])){ (state, next) => state.advance(next, next.matchedContext.isSuccess) }
+		.scan(SplitterState(false, false, XmlStackState.initial[T])){ (state, next) => state.advance(next, !next.matchedContext.isEmpty) }
 		.dropWhile(!_.currentMatches)
 		.splitWhen(_.isNewlyMatched)
 		.takeWhile(_.currentMatches)

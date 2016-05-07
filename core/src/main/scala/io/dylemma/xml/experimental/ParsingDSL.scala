@@ -11,7 +11,7 @@ import scala.language.implicitConversions
 /**
 	* Created by dylan on 2/6/2016.
 	*/
-object ParsingDSL {
+object ParsingDSL extends ParserCombination {
 
 	object Text {
 		object asOption
@@ -24,8 +24,8 @@ object ParsingDSL {
 		def %(t: Text.asList.type) = splitter.textList
 	}
 
-	object Root extends ContextMatcher[Unit] {
-		def apply(v1: List[StartElement]): Result[Unit] = Success.unit
+	object Root extends ChainingContextMatcher[Unit] {
+		protected def matchSegment(stack: List[StartElement]) = Success(() -> stack)
 	}
 
 	val * = SingleElementContextMatcher.predicate(_ => true)

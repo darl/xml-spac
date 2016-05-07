@@ -90,6 +90,17 @@ object FlowHelpers {
 		}
 	}
 
+	def toResultList[A] = fromConsumerHandler{ () =>
+		new ConsumerHandler[A, List[Result[A]]] {
+			private val builder = List.newBuilder[Result[A]]
+			def onInput(input: Result[A]) = {
+				builder += input
+				None
+			}
+			def onEnd() = Result(builder.result)
+		}
+	}
+
 	def concat[A, B, That](implicit t: A => TraversableOnce[B], bf: CanBuildFrom[A, B, That]) = fromConsumerHandler{ () =>
 		new ConsumerHandler[A, That] {
 			private val builder = bf()

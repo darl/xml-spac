@@ -5,7 +5,6 @@ import javax.xml.stream.events.StartElement
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import io.dylemma.xml.Result.{Empty, Error, Success}
-import io.dylemma.xml.experimental.ParserCombination._
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
@@ -47,8 +46,8 @@ object Playground extends App {
 	try {
 
 		val parserA = (* % Text) map ThingA
-		var parserB = (* % Text) map ThingB
-		var parserC = (* % Text) map ThingC
+		val parserB = (* % Text) map ThingB
+		val parserC = (* % Text) map ThingC
 		val demuxABC: Parser[String, Thing] = Parser.demultiplexed[String](
 			parserA -> { _ == "a"},
 			parserB -> { _ == "b" },

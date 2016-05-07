@@ -4,13 +4,14 @@ import javax.xml.namespace.QName
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.events.XMLEvent
 
-import io.dylemma.xml.{AsInputStream, Result, XMLEventSource}
+import _root_.io.dylemma.xml.experimental.Parser.FirstResultStage
 import io.dylemma.xml.Result.{Empty, Success}
+import io.dylemma.xml.{AsInputStream, Result, XMLEventSource}
 import akka.stream._
 import akka.stream.scaladsl._
 import akka.stream.stage._
 
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 
 trait Parser[-Context, +T] { self =>
 	def asFlow: Flow[XmlStackState[Context], Result[T], akka.NotUsed]
@@ -25,7 +26,8 @@ trait Parser[-Context, +T] { self =>
 	): Future[Result[T]] = {
 		val pub = XmlEventPublisher(input, inputFactory)
 		val rawFlow = asRawFlow(anyContext)
-		pub.via(rawFlow).runWith(Sink.head)
+		val headResultSink = Sink.fromGraph(new FirstResultStage[T])
+		pub.via(rawFlow).runWith(headResultSink)
 	}
 
 	def asRawFlow(implicit ev: Any <:< Context): Flow[XMLEvent, Result[T], akka.NotUsed] = {
@@ -97,6 +99,32 @@ object Parser {
 	}
 	def fromGraphStage[Context, A](stage: ParserGraphStage[Context, A]): Parser[Context, A] = {
 		fromFlow(Flow.fromGraph(stage))
+	}
+
+	class FirstResultStage[T] extends GraphStageWithMaterializedValue[SinkShape[Result[T]], Future[Result[T]]] {
+		val in = Inlet[Result[T]]("firstResult.in")
+		val shape: SinkShape[Result[T]] = SinkShape.of(in)
+		def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, Future[Result[T]]) = {
+			val p = Promise[Result[T]]
+			val logic = new GraphStageLogic(shape) {
+				override def preStart() = pull(in)
+				setHandler(in, new InHandler {
+					def onPush(): Unit = {
+						p.trySuccess(grab(in))
+						completeStage()
+					}
+					override def onUpstreamFinish() = {
+						p.trySuccess(Empty)
+						completeStage()
+					}
+					override def onUpstreamFailure(ex: Throwable) = {
+						p.tryFailure(ex)
+						failStage(ex)
+					}
+				})
+			}
+			logic -> p.future
+		}
 	}
 
 	// TODO: this functionality might be better of in FlowHelpers
