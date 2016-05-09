@@ -1,8 +1,12 @@
 package io.dylemma.xml.example
 
-import io.dylemma.xml.ParsingDSL._
+import akka.actor.ActorSystem
+import akka.stream.ActorMaterializer
+import io.dylemma.xml.experimental.ParsingDSL._
 import io.dylemma.xml.Result
-import play.api.libs.iteratee.Execution.Implicits.trampoline
+
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 /**
  * Created by dylan on 10/11/2015.
@@ -21,28 +25,33 @@ object ExampleSimple {
 	val parser = (Root / "library" / "book" % Text.asList)
 
 	def main(args: Array[String]): Unit = {
+		implicit val actorSystem = ActorSystem("example-system")
+		implicit val actorMaterializer = ActorMaterializer()
 
-		// Parsers can parse anything belonging to the `AsInputStream` type class,
-		// e.g. Strings, InputStreams, and Files
-		val parseResultFuture = parser parse libraryXml
+		try {
 
-		// Since we're using play's `trampoline` ExecutionContext, the Future will
-		// have run in the current thread, so we don't need to wait for it.
-		val parseResult = parseResultFuture.value.get.get
+			// Parsers can parse anything belonging to the `AsInputStream` type class,
+			// e.g. Strings, InputStreams, and Files
+			val parseResult = Await.result(parser parse libraryXml, 5.seconds)
 
-		// The `parseResult` is a Parser.Result containing the list of titles
-		parseResult match {
-			case Result.Error(cause) => cause.printStackTrace()
-			case Result.Empty => println("no results")
-			case Result.Success(titles) =>
-				for (title <- titles) println(s"book: $title")
+			// The `parseResult` is a Parser.Result containing the list of titles
+			parseResult match {
+				case Result.Error(cause) => cause.printStackTrace()
+				case Result.Empty => println("no results")
+				case Result.Success(titles) =>
+					for (title <- titles) println(s"book: $title")
+			}
+
+			println("\n---\n")
+
+			// you can also use `foreach` with Results
+			for {
+				titles <- parseResult
+				title <- titles
+			} println(s"book foreach: $title")
+
+		} finally {
+			actorSystem.terminate()
 		}
-
-		// you can also use `foreach` with Parser.Results
-		for {
-			titles <- parseResult
-			title <- titles
-		} println(s"book foreach: $title")
-
 	}
 }
